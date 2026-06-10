@@ -58,4 +58,4 @@ schema:
   llm_base_url: "url"
   llm_model: "str"
   llm_api_key: "password"
-image: "ghcr.io/lxgxdx/{slug}"
+image: "ghcr.io/lxgxdx/ha-ai-designer"
