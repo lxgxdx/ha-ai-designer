@@ -7,7 +7,7 @@ description: >
   Describe your dashboard in natural language; the tool reads your live
   HA entities, generates a LovelaceConfig YAML, and pushes it to your
   dashboard — all running locally as a HA Add-on.
-url: "http://[HOST]:[PORT:3000]"
+url: "https://github.com/lxgxdx/ha-ai-designer"
 arch:
   - amd64
   - aarch64

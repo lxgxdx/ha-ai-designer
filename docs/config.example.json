@@ -1,8 +1,8 @@
 {
+  "_note": "EXAMPLE config template. The real config.json (with HA token + LLM key) is gitignored. Copy this file to data/config.json and fill in the values.",
   "ha": {
     "baseUrl": "http://<your-ha-ip>:8123",
-    "token": "<long-lived-access-token>",
-    "_note": "Create a long-lived token at http://<your-ha-ip>:8123/profile/security.  Token file is gitignored — never commit the real config.json."
+    "token": "<long-lived-access-token>"
   },
   "llm": {
     "provider": "minimax",
