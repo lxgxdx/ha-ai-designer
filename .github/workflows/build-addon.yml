@@ -23,10 +23,11 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  # IMAGE_NAME must resolve to a repo under the GH user/org, not the
-  # full repo path (which would push to <user>/<repo>/ha-ai-designer).
-  # Use the github.repository_owner so we push to ghcr.io/<owner>/<name>.
-  IMAGE_NAME: ha-ai-designer
+  # Push destination: ghcr.io/<github.repository_owner>/ha-ai-designer.
+  # Owner prefix is supplied in IMAGE_NAME so docker/metadata-action can
+  # correctly resolve images to push to.  Don't include the owner in
+  # `images:` below — that would create a double prefix.
+  IMAGE_NAME: ${{ github.repository_owner }}/ha-ai-designer
   # The slug used by HA supervisor — must match config.yaml slug field
   ADDON_SLUG: ha_ai_designer
 
@@ -73,7 +74,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/ha-ai-designer
           tags: |
             type=ref,event=branch
             type=ref,event=pr
