@@ -80,7 +80,7 @@ node dist/server.js \
 DAEMON_PID=$!
 echo $DAEMON_PID > "${DATA_DIR}/.pid.daemon"
 
-# 5. Start the web UI (Next.js standalone)
+# 5. Start the web UI (Next.js default server)
 bashio::log.info "Starting web UI on port ${HA_WEB_PORT}…"
 cd /opt/ha-ai-designer/apps/web
 HOSTNAME=0.0.0.0 \
@@ -89,7 +89,7 @@ HOSTNAME=0.0.0.0 \
   HA_WEB_PORT="${HA_WEB_PORT}" \
   HA_DATA_DIR="${DATA_DIR}" \
   PORT="${HA_WEB_PORT}" \
-  node server.js \
+  node node_modules/.bin/next start -p "${HA_WEB_PORT}" \
   >> "${DATA_DIR}/logs/web.log" 2>&1 &
 WEB_PID=$!
 echo $WEB_PID > "${DATA_DIR}/.pid.web"
