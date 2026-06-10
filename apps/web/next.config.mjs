@@ -3,10 +3,12 @@ const nextConfig = {
   reactStrictMode: true,
   // Transpile workspace packages so their TS source is consumable from app routes.
   transpilePackages: ['@ha-designer/contracts'],
-  // Standalone output — emits `.next/standalone/` with a self-contained
-  // node_modules tree, so the add-on image can copy just that dir and
-  // run `node server.js` without npm install.
-  output: 'standalone',
+  // NOTE: output: 'standalone' (and the default Next.js server build) trigger
+  //  the "<Html> should not be imported outside of pages/_document" error
+  //  during the static-pages prerender phase in Next.js 14.2.35 and 15.1.6.
+  //  We use pnpm deploy --prod in the Dockerfile instead, which produces a
+  //  self-contained runtime with all production deps inlined.
+  // output: 'standalone',
   // Forward HA_DAEMON_* env to the server runtime (used by API proxy route).
   env: {
     HA_DAEMON_URL:

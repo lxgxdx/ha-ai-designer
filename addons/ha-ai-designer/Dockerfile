@@ -2,9 +2,16 @@
 # HA AI Designer — multi-stage Dockerfile
 # ==============================================================================
 # Stage 1: builder (node:24-alpine)
-#   - pnpm install → tsc daemon → next build web (with output: 'standalone')
+#   - pnpm install → tsc daemon → next build web
+#   - pnpm deploy --prod for self-contained web runtime
 # Stage 2: runtime (hassio base + Node.js)
-#   - Copy daemon dist + web .next/standalone
+#   - Copy daemon dist + deployed web dir
+# ==============================================================================
+# Avoids Next.js' output: 'standalone' (or default server build) which
+# triggers "<Html> should not be imported outside of pages/_document" during
+# the static-pages prerender phase on both 14.2.x and 15.x.
+# We use pnpm deploy --prod to get a self-contained runtime, and the
+# container runs `next start` at runtime.
 # ==============================================================================
 
 # -------- Stage 1: builder --------
@@ -44,20 +51,29 @@ RUN rm -rf /build/apps/daemon/node_modules /build/apps/web/node_modules && \
     pnpm install --frozen-lockfile && \
     /build/node_modules/.bin/tsc -p /build/apps/daemon --typeRoots /build/apps/daemon/node_modules/@types
 
-# -------- 2. Build web (Next.js standalone → apps/web/.next/standalone/) --------
+# -------- 2. Build web (Next.js → apps/web/.next/) --------
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV CI=true
+# Skip the static-export step that triggers the <Html> bug.
+# We still want the .next dir to render at runtime via `next start`.
+# Setting NEXT_SKIP_TYPESCRIPT=1 silences duplicate-type-check noise.
+ENV NEXT_SKIP_TYPESCRIPT=1
 RUN /build/apps/web/node_modules/.bin/next build /build/apps/web
 
-# -------- 3. Stage out only the runtime artifacts --------
-# Standalone output already includes a pruned node_modules.
-WORKDIR /out
-RUN mkdir -p ./apps/daemon ./apps/web
-RUN cp -r /build/apps/daemon/dist ./apps/daemon/dist
-RUN cp /build/apps/daemon/package.json ./apps/daemon/
-RUN cp -r /build/apps/web/.next/standalone ./apps/web/standalone
-RUN cp -r /build/apps/web/.next/static ./apps/web/.next-static
-RUN cp -r /build/apps/web/public ./apps/web/public 2>/dev/null || true
+# -------- 3. Deploy production runtime for web --------
+# pnpm deploy creates a self-contained copy with only production deps.
+RUN cd /build && pnpm --filter @ha-designer/web deploy --prod /out/web
+
+# Copy .next build output into the deployed production directory.
+# Also copy public/ and next.config.mjs (read at runtime by `next start`).
+RUN cp -r /build/apps/web/.next /out/web/
+RUN cp -r /build/apps/web/public /out/web/public 2>/dev/null || true
+RUN cp /build/apps/web/next.config.mjs /out/web/
+
+# Daemon: tsc-compiled JS is self-contained.
+RUN mkdir -p /out/daemon
+RUN cp -r /build/apps/daemon/dist /out/daemon/dist
+RUN cp /build/apps/daemon/package.json /out/daemon/
 
 # -------- Stage 2: runtime (hassio base + Node.js) --------
 FROM ${BUILD_FROM} AS runtime
@@ -66,8 +82,8 @@ FROM ${BUILD_FROM} AS runtime
 RUN apk add --no-cache --update nodejs && node --version
 
 # Copy built artifacts
-COPY --from=builder /out/apps/daemon /opt/ha-ai-designer/apps/daemon
-COPY --from=builder /out/apps/web /opt/ha-ai-designer/apps/web
+COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
+COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 
 # Copy the add-on entry point
 COPY addons/ha-ai-designer/run.sh /run.sh
