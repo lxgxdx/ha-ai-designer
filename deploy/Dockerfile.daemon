@@ -1,0 +1,31 @@
+# Daemon image — Node 24, pnpm 10, runs the Express daemon in production mode.
+#
+# Stage 1: install deps in a slim layer
+# Stage 2: copy source + build (skip build for skeleton, tsx runs TS directly)
+
+FROM node:24-alpine AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm/bin:$PATH
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
+
+WORKDIR /app
+
+# Copy workspace manifest first for layer caching
+COPY pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml* ./
+COPY apps/daemon/package.json ./apps/daemon/
+COPY apps/web/package.json ./apps/web/
+COPY packages/contracts/package.json ./packages/contracts/
+COPY tools/dev/package.json ./tools/dev/
+
+RUN pnpm install --frozen-lockfile --prod=false
+
+# Copy sources
+COPY tsconfig.base.json ./
+COPY apps ./apps
+COPY packages ./packages
+COPY tools ./tools
+
+WORKDIR /app/apps/daemon
+ENV NODE_ENV=production HA_DAEMON_PORT=7456
+EXPOSE 7456
+CMD ["pnpm", "start"]

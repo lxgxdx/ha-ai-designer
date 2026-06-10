@@ -1,0 +1,24 @@
+# room-block.yaml — One per-area section.
+#
+# A "section" is a single section grid block with:
+#   - a heading card (only if there are 4+ entities, otherwise skip heading)
+#   - one card per light / switch / climate / sensor in the area
+#
+# LLM repeats this template once per area, substituting:
+#   <ROOM_TITLE>   e.g. "客厅" / "主卧" / "餐厅"
+#   <LIGHT_CARDS>  list of `type: tile` cards, one per light
+#   <SWITCH_CARDS> list of `tile` cards, one per switch
+#   <CLIMATE_CARDS> list of `thermostat` cards (if include_climate)
+#   <SENSOR_CARDS> list of `sensor` cards (if include_sensors)
+
+- type: grid
+  column_span: full
+  cards:
+    # Heading is a no-type card from HA 2024.3+; falls back to markdown
+    # in older HA. The orchestrator picks one based on detected HA version.
+    - type: heading
+      heading: <ROOM_TITLE>
+    <LIGHT_CARDS>
+    <SWITCH_CARDS>
+    <CLIMATE_CARDS>
+    <SENSOR_CARDS>

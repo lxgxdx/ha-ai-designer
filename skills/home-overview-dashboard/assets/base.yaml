@@ -1,0 +1,30 @@
+# base.yaml — Home Overview Dashboard skeleton
+#
+# This is the LLM's starting point. It will:
+#   1. Replace <ROOM_BLOCKS> with one grid block per area (see room-block.yaml)
+#   2. Replace <SHORTCUT_CARDS> with the top-row global cards
+#   3. Replace <FOOTER_CARDS> with the bottom sensor / update cards
+#   4. Resolve <TITLE> from inputs.style
+
+title: <TITLE>
+
+views:
+  - title: 总览
+    path: home
+    type: sections
+    max_columns: 4
+    sections:
+      # Top row: 全屋快捷 (presence, all-lights, all-switches, climate average)
+      - type: grid
+        cards:
+          <SHORTCUT_CARDS>
+
+      # Per-area sections, one grid block per area
+      - type: grid
+        cards:
+          <ROOM_BLOCKS>
+
+      # Footer: sensors, updates, system info
+      - type: grid
+        cards:
+          <FOOTER_CARDS>

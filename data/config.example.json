@@ -1,0 +1,13 @@
+{
+  "ha": {
+    "baseUrl": "http://<your-ha-ip>:8123",
+    "token": "<long-lived-access-token>",
+    "_note": "Create a long-lived token at http://<your-ha-ip>:8123/profile/security.  Token file is gitignored — never commit the real config.json."
+  },
+  "llm": {
+    "provider": "minimax",
+    "baseUrl": "https://api.minimaxi.com/v1",
+    "apiKey": "<your-minimax-api-key>",
+    "model": "MiniMax-Text-01"
+  }
+}

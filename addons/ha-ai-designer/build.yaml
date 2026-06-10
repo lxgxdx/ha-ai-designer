@@ -1,0 +1,15 @@
+---
+build_from:
+  amd64: "ghcr.io/hassio-addons/base:16.3.2"
+  aarch64: "ghcr.io/hassio-addons/base/aarch64:16.3.2"
+  armv7: "ghcr.io/hassio-addons/base/armv7:16.3.2"
+  armhf: "ghcr.io/hassio-addons/base/armhf:16.3.2"
+  i386: "ghcr.io/hassio-addons/base/i386:16.3.2"
+labels:
+  org.opencontainers.image.title: "HA AI Designer"
+  org.opencontainers.image.description: "Local-first AI designer for Home Assistant Lovelace dashboards."
+  org.opencontainers.image.licenses: "Apache-2.0"
+  org.opencontainers.image.source: "https://github.com/nexu-io/ha-ai-designer"
+  org.opencontainers.image.url: "https://github.com/nexu-io/ha-ai-designer"
+args:
+  TEMP_BRANCH: "main"

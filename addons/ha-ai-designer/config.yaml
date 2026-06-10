@@ -1,0 +1,64 @@
+---
+name: "HA AI Designer"
+version: "0.1.0"
+slug: "ha_ai_designer"
+description: >
+  Local-first AI designer for Home Assistant Lovelace dashboards.
+  Describe your dashboard in natural language; the tool reads your live
+  HA entities, generates a LovelaceConfig YAML, and pushes it to your
+  dashboard — all running locally as a HA Add-on.
+url: "http://[HOST]:[PORT:3000]"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+init: false
+startup: services
+boot: auto
+hassio_api: true
+hassio_role: default
+homeassistant_api: true
+host_network: false
+auth: false
+ingress: true
+panel_icon: "mdi:robot"
+panel_title: "AI Designer"
+panel_admin: true
+ports:
+  "7456/tcp": null
+  "3000/tcp": null
+ports_description:
+  "7456/tcp": "daemon REST API (internal; prefer ingress)"
+  "3000/tcp": "web UI (internal; prefer ingress)"
+discovery:
+  - ha_ai_designer
+services:
+  - "mqtt:need"
+options:
+  schema:
+    log_level: "list|info|debug|trace|warn|error"
+    ingress_port: "port"
+    data_dir: "str"
+    llm_provider: "list|minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom"
+    llm_base_url: "str"
+    llm_model: "str"
+    llm_api_key: "password"
+  default:
+    log_level: "info"
+    ingress_port: 3000
+    data_dir: "/data"
+    llm_provider: "minimax"
+    llm_base_url: "https://api.minimaxi.com/v1"
+    llm_model: "MiniMax-Text-01"
+    llm_api_key: ""
+schema:
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
+  ingress_port: "port"
+  data_dir: "str"
+  llm_provider: "list(minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom)"
+  llm_base_url: "url"
+  llm_model: "str"
+  llm_api_key: "password"
+image: "ghcr.io/nexu-io/{slug}"

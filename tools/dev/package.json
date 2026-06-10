@@ -1,0 +1,23 @@
+{
+  "name": "@ha-designer/tools-dev",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local lifecycle control plane: pnpm tools-dev {start,stop,status,run,logs,check}.",
+  "type": "module",
+  "bin": {
+    "ha-dev": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ha-designer/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}

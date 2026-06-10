@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Runtime data — gitignore everything except the example config template.
+# data/config.json contains HA long-lived token + LLM API key.
+# data/backups/ may contain dashboard snapshots with personal entity names.
+data/*
+!data/config.example.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test artifacts / screenshots
+ScreenShot_*.png
+*.jpg
+*.jpeg
+*.gif
+
+# Local env
+.env
+.env.local
+.env.*.local
+hha-knowledge/

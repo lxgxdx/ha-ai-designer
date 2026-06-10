@@ -1,0 +1,33 @@
+{
+  "name": "@ha-designer/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local daemon — owns /api/*, HA adapter, LLM orchestration, artifact store.",
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/server.ts",
+    "start": "node --import tsx src/server.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "guard": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ha-designer/contracts": "workspace:*",
+    "cors": "2.8.5",
+    "express": "4.21.2",
+    "js-yaml": "4.1.0",
+    "pino": "9.5.0",
+    "pino-pretty": "11.3.0",
+    "ws": "8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "2.8.17",
+    "@types/express": "4.17.21",
+    "@types/js-yaml": "4.0.9",
+    "@types/node": "22.10.2",
+    "@types/ws": "8.5.13",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3"
+  }
+}
