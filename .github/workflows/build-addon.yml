@@ -100,6 +100,19 @@ jobs:
           platforms: ${{ matrix.arch.platform }}
           load: ${{ !(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push)) }}
           push: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push) }}
+
+      - name: Make package public (HA installs need anonymous pull)
+        if: github.event_name == 'push'
+        run: |
+          PACKAGE_NAME="ha-ai-designer"
+          # Use the built-in GITHUB_TOKEN which now has packages: write via the
+          # top-level permissions block.  No additional PAT needed.
+          curl -sS -X PATCH \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/user/packages/container/${PACKAGE_NAME} \
+            -d '{"visibility":"public"}' \
+            -o /dev/null -w "PATCH status: %{http_code}\n"
           build-args: |
             BUILD_FROM=${{ matrix.arch.base_image }}
             BUILD_ARCH=${{ matrix.arch.arch }}
