@@ -54,6 +54,7 @@ pnpm tools-dev logs --daemon|--web
 1. 缺根 `repository.yaml`
 2. `config.yaml` 的 `url` 字段值不是合法 URL（不能用 `http://[HOST]:[PORT:3000]` 模板）
 3. 仓库里**任何子目录**下的 `config.json` / `config.yaml` 都被 HA 扫到当 add-on config；误读会拒绝整个仓库。**`data/config.example.json` 这种 template 文件**必须放仓库外（`docs/`）或者改名成非 `config.*` 模式。
+4. `config.yaml` 的 `image` 字段**只支持 `{arch}` 占位符**（`str.format(arch=arch)`），不支持 `{slug}`。写死镜像名（如 `ghcr.io/<owner>/<image>`），不要模板化。
 
 CI（`.github/workflows/build-addon.yml`）：
 - push master → build amd64 + aarch64 → push `ghcr.io/lxgxdx/ha-ai-designer:{master,latest}`
