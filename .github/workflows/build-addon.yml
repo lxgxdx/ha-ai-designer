@@ -114,17 +114,8 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.arch.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch.arch }}
 
-      - name: Make package public (HA installs need anonymous pull)
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push)
-        run: |
-          PACKAGE_NAME="ha-ai-designer"
-          OWNER="${{ github.repository_owner }}"
-          # GitHub Packages visibility API: PUT /{owner}/packages/{type}/{name}/visibility
-          # (PATCH on /user/packages/.../container/{name} returns 404.)
-          # The top-level permissions block grants packages: write to GITHUB_TOKEN.
-          curl -sS -X PUT \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/users/${OWNER}/packages/container/${PACKAGE_NAME}/visibility" \
-            -d '{"visibility":"public"}' \
-            -o /dev/null -w "PUT status: %{http_code}\n"
+      # NOTE: GitHub does not allow changing package visibility via REST API.
+      # The maintainer must set it to Public manually:
+      #   https://github.com/users/lxgxdx/packages/container/ha-ai-designer/settings
+      # (Danger Zone → Change package visibility → Public)
+      # HA needs anonymous pull for the install to succeed.
