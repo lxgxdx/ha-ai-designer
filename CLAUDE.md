@@ -44,7 +44,7 @@ pnpm tools-dev stop / status / check
 pnpm tools-dev logs --daemon|--web
 ```
 
-生产跑（脱 tsx）：`cd apps/daemon && node dist/server.js`；`cd apps/web && node .next/standalone/apps/web/server.js`（但注意：**当前实际 CI build 不输出 standalone，详见下文**）。
+生产跑（脱 tsx）：`cd apps/daemon && node dist/server.js`；web 走 `cd apps/web && node node_modules/.bin/next start -p 3000`（CI Dockerfile 不用 `output: 'standalone'`，因 Next.js 14/15 `/_error` prerender bug；改用 `pnpm deploy --prod --legacy` 拿生产 runtime + `next start`，详见下文"Docker build 关键教训"）。
 
 ## HA Add-on / Docker 部署（CI 自动化）
 
@@ -117,6 +117,7 @@ chat        /api/chat
 - **HA 版本**：2026.6.0，REST 删了 dashboard 端点
 - **HA 实例**：`http://192.168.88.183:8123`，1499 实体
 - **HA token + LLM key** 都在 `data/config.json`（gitignore，mode 0600），端点响应**只 mask 不回显**
+- **Add-on 模式下不配 HA token**：`addons/ha-ai-designer/config.yaml` 设 `homeassistant_api: true`，supervisor 注入 `SUPERVISOR_TOKEN` 给容器；`addons/ha-ai-designer/run.sh` 首次启动时把 SUPERVISOR_TOKEN 写到 `/data/config.json` 的 `ha.token`，daemon 走 `http://supervisor/core` 调 HA REST+WS。LLM 凭证则必须用户在 add-on Configuration 页填。
 - **Windows 坑**（AGENTS.md 也有，这里只列和 build 相关的）：
   - `pnpm scripts` 字段不展开 `${VAR:-default}` → `apps/web/scripts/{dev,start}.mjs` Node wrapper
   - `spawn('pnpm')` ENOENT → `tools/dev/src/ports.ts` 的 `spawnPnpm`（`shell: true` + 显式 PATH）
