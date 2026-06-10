@@ -21,6 +21,12 @@ on:
         type: boolean
         default: false
 
+# Required to push to ghcr.io: the default GITHUB_TOKEN can read public
+# packages but creating a new package requires explicit write permission.
+permissions:
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   # Push destination: ghcr.io/<github.repository_owner>/ha-ai-designer.
