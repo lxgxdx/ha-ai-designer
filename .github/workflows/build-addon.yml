@@ -10,10 +10,10 @@ name: Build HA Add-on Image
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
     inputs:
       push:
@@ -82,7 +82,7 @@ jobs:
             type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
           labels: |
             org.opencontainers.image.title=HA AI Designer
             org.opencontainers.image.description=Local-first AI designer for HA Lovelace dashboards
