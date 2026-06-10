@@ -9,7 +9,7 @@ labels:
   org.opencontainers.image.title: "HA AI Designer"
   org.opencontainers.image.description: "Local-first AI designer for Home Assistant Lovelace dashboards."
   org.opencontainers.image.licenses: "Apache-2.0"
-  org.opencontainers.image.source: "https://github.com/nexu-io/ha-ai-designer"
-  org.opencontainers.image.url: "https://github.com/nexu-io/ha-ai-designer"
+  org.opencontainers.image.source: "https://github.com/lxgxdx/ha-ai-designer"
+  org.opencontainers.image.url: "https://github.com/lxgxdx/ha-ai-designer"
 args:
   TEMP_BRANCH: "main"
