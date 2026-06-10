@@ -65,7 +65,7 @@ RUN /build/apps/web/node_modules/.bin/next build /build/apps/web
 
 # -------- 3. Deploy production runtime for web --------
 # pnpm deploy creates a self-contained copy with only production deps.
-RUN cd /build && pnpm --filter @ha-designer/web deploy --prod /out/web
+RUN cd /build && pnpm --filter @ha-designer/web deploy --prod --legacy /out/web
 
 # Copy .next build output into the deployed production directory.
 # Also copy public/ and next.config.mjs (read at runtime by `next start`).
