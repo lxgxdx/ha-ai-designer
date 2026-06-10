@@ -52,11 +52,14 @@ RUN rm -rf /build/apps/daemon/node_modules /build/apps/web/node_modules && \
     /build/node_modules/.bin/tsc -p /build/apps/daemon --typeRoots /build/apps/daemon/node_modules/@types
 
 # -------- 2. Build web (Next.js → apps/web/.next/) --------
+# CRITICAL: NODE_ENV must be 'production' for `next build` to take the
+# production code path. We set it to 'development' above for pnpm install
+# to fetch devDependencies; here we override it.  Without this override,
+# Next.js logs a non-standard-NODE_ENV warning and (with our setup) takes
+# the wrong rendering path which triggers the "<Html>" prerender bug.
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV CI=true
-# Skip the static-export step that triggers the <Html> bug.
-# We still want the .next dir to render at runtime via `next start`.
-# Setting NEXT_SKIP_TYPESCRIPT=1 silences duplicate-type-check noise.
+ENV NODE_ENV=production
 ENV NEXT_SKIP_TYPESCRIPT=1
 RUN /build/apps/web/node_modules/.bin/next build /build/apps/web
 
