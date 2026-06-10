@@ -35,21 +35,15 @@ jobs:
       fail-fast: false
       matrix:
         arch:
+          # FIXME: node:24-alpine only supports amd64 + arm64.
+          # armv7/armhf/i386 need a different builder base image.
+          # For now, build the primary HA architectures.
           - arch: amd64
             platform: linux/amd64
             base_image: ghcr.io/hassio-addons/base:16.3.2
           - arch: aarch64
             platform: linux/arm64
             base_image: ghcr.io/hassio-addons/base/aarch64:16.3.2
-          - arch: armv7
-            platform: linux/arm/v7
-            base_image: ghcr.io/hassio-addons/base/armv7:16.3.2
-          - arch: armhf
-            platform: linux/arm/v6
-            base_image: ghcr.io/hassio-addons/base/armhf:16.3.2
-          - arch: i386
-            platform: linux/386
-            base_image: ghcr.io/hassio-addons/base/i386:16.3.2
 
     steps:
       - name: Checkout
@@ -58,7 +52,7 @@ jobs:
       - name: Set up QEMU (multi-arch emulation)
         uses: docker/setup-qemu-action@v3
         with:
-          platforms: arm64,arm/v7,arm/v6,386
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
