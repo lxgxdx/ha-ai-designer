@@ -11,8 +11,16 @@
 # "legacy-services stopping/stopped" without a clear error in stdout.  Every
 # step is guarded and logged explicitly below.
 # ------------------------------------------------------------------------------
-
-bashio::log.info "HA AI Designer add-on starting..."
+# NOTE: s6-overlay (used by hassio base 16) does NOT forward this script's
+# stdout to the HA supervisor log view.  We tee everything to
+# /data/logs/run.log so the user can read it from the host if needed, and
+# the daemon / web process logs go to /data/logs/{daemon,web}.log.
+#
+# Make sure /data/logs exists BEFORE the first tee (otherwise some s6 services
+# start this script with a non-writable /data).
+mkdir -p /data/logs 2>/dev/null || true
+# Mirror every stdout/stderr line to /data/logs/run.log.
+exec > >(tee -a /data/logs/run.log) 2>&1
 
 # 1. Read user-supplied options (set as env vars by supervisor).
 #    Tolerate missing options by defaulting to empty — supervisor sometimes
