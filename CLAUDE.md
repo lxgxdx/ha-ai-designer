@@ -60,10 +60,10 @@ pnpm tools-dev logs --daemon|--web
    → Danger Zone → Change package visibility → Public
 
 CI（`.github/workflows/build-addon.yml`）：
-- push master → build amd64 + aarch64 → push `ghcr.io/lxgxdx/ha-ai-designer:{master,latest}`
+- push master → build **amd64 only**（matrix 多架构被临时砍，详见"Docker build 关键教训"）→ push `ghcr.io/lxgxdx/ha-ai-designer:{master,latest}`
 - push tag `vX.Y.Z` → push `:{X.Y.Z}`（HA 商店用这个 tag 对应 `config.yaml: version`）
 
-**架构只有 amd64 + aarch64**（`config.yaml` arch list；`build.yaml` build_from）。armv7/armhf/i386 因 `node:24-alpine` 不支持被砍。
+**架构只 build amd64**（你的 HA 是 x86 VM 暂够用）。`config.yaml` arch list 还列 aarch64 占位，但 CI matrix 只跑 amd64（多架构矩阵并行 push 会互相覆盖 manifest list）。未来加 aarch64 用 `docker buildx imagetools create` 合并。
 
 ## Docker build 关键教训（避免重蹈）
 
@@ -73,6 +73,8 @@ CI（`.github/workflows/build-addon.yml`）：
 4. **`pnpm deploy` 10.x 必须加 `--legacy`**（ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE）。
 5. **CI 需要 `permissions: packages: write`** — 默认 GITHUB_TOKEN 没 packages 写权限。
 6. **CI 的 `images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}` 解析后必须带 owner**，否则 push 到 `ghcr.io/<image>` 报 "Create organization package" denied。
+7. **多架构 matrix 并行 push 互相覆盖 manifest list**（GHCR 不会自动合并）。当前只 build amd64；多架构要 `docker buildx imagetools create` 合并。
+8. **s6-overlay 不把 run.sh stdout 转发到 HA supervisor log**。v0.1.4 起 run.sh 加 `exec > >(tee -a /data/logs/run.log) 2>&1`，从 host 上 `docker exec addon_* cat /data/logs/run.log` 才能看 root cause。
 
 ## HA 端点行为（实测 HA 2026.6.0）
 
@@ -118,6 +120,7 @@ chat        /api/chat
 - **HA 实例**：`http://192.168.88.183:8123`，1499 实体
 - **HA token + LLM key** 都在 `data/config.json`（gitignore，mode 0600），端点响应**只 mask 不回显**
 - **Add-on 模式下不配 HA token**：`addons/ha-ai-designer/config.yaml` 设 `homeassistant_api: true`，supervisor 注入 `SUPERVISOR_TOKEN` 给容器；`addons/ha-ai-designer/run.sh` 首次启动时把 SUPERVISOR_TOKEN 写到 `/data/config.json` 的 `ha.token`，daemon 走 `http://supervisor/core` 调 HA REST+WS。LLM 凭证则必须用户在 add-on Configuration 页填。
+- **Add-on 调试入口**：当 HA supervisor log 卡在 banner 不动时，从 HA SSH 终端跑 `docker exec addon_<id> cat /data/logs/{run,daemon,web}.log` 拿真实日志。
 - **Windows 坑**（AGENTS.md 也有，这里只列和 build 相关的）：
   - `pnpm scripts` 字段不展开 `${VAR:-default}` → `apps/web/scripts/{dev,start}.mjs` Node wrapper
   - `spawn('pnpm')` ENOENT → `tools/dev/src/ports.ts` 的 `spawnPnpm`（`shell: true` + 显式 PATH）
