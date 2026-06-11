@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.1 — 2026-06-10
+
+### Fixed
+- `run.sh` no longer exits the whole container when bashio::config returns
+  empty (e.g. user hasn't filled `llm_api_key` yet). Previously the `set -e`
+  + unset-option combo caused s6 to loop on "legacy-services stopping/stopped"
+  with no clear error.
+- `bashio::config` calls now pass explicit defaults so a freshly-installed
+  add-on can start before the user fills in any options.
+- Background daemon/web processes now run via `nohup` so the run.sh main
+  process can still complete (and s6 sees a healthy service).
+
 ## 0.1.0 — 2026-06-06
 
 ### Added
