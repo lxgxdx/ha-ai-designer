@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.18 — 2026-06-13
+
+### Changed
+- Back to **port mode** (`ingress: false`, ports 7456 and 3000
+  explicitly mapped to host). The v0.1.17 ingress re-enable didn't
+  work: supervisor's `addons info` showed `ingress_port: 8099`
+  (supervisor's own internal port) and ignored our
+  `default.ingress_port: 3000`. Debugging supervisor's ingress
+  port assignment behaviour is not worth the time today; port
+  mode is verified working and we have a clean way to surface
+  the UI in HA via a Webpage card.
+
+### How to use inside HA
+1. After install, open `http://<ha-host>:3000/` in any browser
+   to use the tool directly.
+2. To surface it inside the HA UI: edit any dashboard → **Add
+   card → Webpage** → URL `http://<ha-host>:3000` → save. The
+   Webpage card embeds the tool as an iframe, with the same
+   X-Frame-Options caveats as any external embed.
+
 ## 0.1.17 — 2026-06-13
 
 ### Changed
