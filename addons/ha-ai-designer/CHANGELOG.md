@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.13 — 2026-06-13
+
+### Fixed
+- v0.1.12's `npm install -g npm@10` never even ran — the very first
+  `npm --version` crashed with MODULE_NOT_FOUND because the
+  `COPY --from=builder /usr/local/bin/npm` step only copied the
+  shebang wrapper (`#!/usr/local/bin/node\nrequire('../lib/...')`)
+  without the npm package files it requires. The wrapper was
+  broken from the moment it landed.
+- Take the **entire /usr/local tree** from the builder stage
+  (`COPY --from=builder /usr/local/ /usr/local/`) — this brings
+  node + npm + npx + their modules in one shot, no relative
+  require to break. hassio base's /usr/local is empty so the
+  overlay is safe.
+- Drop the v0.1.12 `npm install -g npm@10` step (no longer needed).
+
 ## 0.1.12 — 2026-06-13
 
 ### Fixed

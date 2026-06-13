@@ -103,12 +103,15 @@ FROM ${BUILD_FROM} AS runtime
 # from builder doesn't always work (node:24-alpine's npm files end up
 # at a different relative path than /usr/local/lib/node_modules/npm/).
 RUN apk add --no-cache libstdc++
-COPY --from=builder /usr/local/bin/node /usr/local/bin/node
-COPY --from=builder /usr/local/bin/npm  /usr/local/bin/npm
-COPY --from=builder /usr/local/bin/npx /usr/local/bin/npx
+# Copy the entire /usr/local tree from the builder stage (node:24-alpine
+# ships /usr/local with node, npm, npx, corepack, plus their modules
+# under /usr/local/lib/node_modules/). Selective COPY of just the
+# /usr/local/bin/{node,npm,npx} wrappers left a dangling require
+# (../lib/node_modules/npm/...) — so we take the whole tree.
+# /usr/local/bin still wins on PATH over the hassio-base /usr/bin/node.
+COPY --from=builder /usr/local/ /usr/local/
 RUN hash -r \
     && node --version \
-    && npm install -g npm@10 \
     && npm --version
 
 # Copy built artifacts
