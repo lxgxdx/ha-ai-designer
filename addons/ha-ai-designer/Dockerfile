@@ -92,6 +92,14 @@ COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 COPY addons/ha-ai-designer/run.sh /run.sh
 RUN chmod a+x /run.sh
 
+# Register run.sh with s6-overlay's legacy-services.
+# s6 does NOT auto-execute /run.sh — it only watches /etc/services.d/<name>/run
+# and /etc/cont-init.d/<name>. Without this symlink the add-on banner prints
+# fine but legacy-services reports "successfully started" with no script ever
+# run, so daemon/web never come up. (v0.1.4 root cause.)
+RUN mkdir -p /etc/services.d/ha-ai-designer \
+    && ln -sf /run.sh /etc/services.d/ha-ai-designer/run
+
 # Container labels (overridden by build.yaml, but kept for reference)
 ARG BUILD_ARCH
 ARG BUILD_DATE

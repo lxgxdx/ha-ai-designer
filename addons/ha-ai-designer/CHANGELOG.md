@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.5 — 2026-06-13
+
+### Fixed
+- **The add-on banner hung for 3+ minutes on v0.1.4 because `run.sh` was
+  never executed.** s6-overlay (hassio base 16) only runs scripts under
+  `/etc/services.d/<name>/run` and `/etc/cont-init.d/<name>/` — it does
+  not auto-pick up `/run.sh`. v0.1.4 added `tee /data/logs/run.log` but
+  the script was never reached, so `/data/logs/` was never created and
+  the user saw no log output at all.
+- Dockerfile now symlinks `/run.sh` → `/etc/services.d/ha-ai-designer/run`
+  so s6's `legacy-services` actually launches the entry point. Confirmed
+  via `docker exec ps -ef` (only s6 processes running on v0.1.4).
+
+## 0.1.4 — 2026-06-11
+
+### Added
+- `run.sh` now tees its stdout/stderr to `/data/logs/run.log` (and the
+  background daemon/web to `daemon.log` / `web.log`), so when the add-on
+  appears stuck on the banner the host operator can read the real
+  startup log via `docker exec addon_* cat /data/logs/{run,daemon,web}.log`.
+  Intended to make root-cause diagnosis possible without a privileged
+  HA shell — but on its own it was not enough, see 0.1.5.
+
 ## 0.1.1 — 2026-06-10
 
 ### Fixed
