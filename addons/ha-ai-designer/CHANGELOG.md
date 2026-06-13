@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.19 — 2026-06-13
+
+### Security
+- Reverted v0.1.18's port-mode escape hatch. Port mode + `auth: false`
+  exposed the daemon (7456) and web (3000) to anything on the host
+  network with no authentication — a CRITICAL issue (any device that
+  can reach the host's 3000/7456 can call the daemon, including the
+  `/api/ha/dashboards/preview` write path). Back to ingress mode:
+  - `ingress: true` — HA's reverse proxy + SSO session guards the UI.
+  - `auth: false` is intentional in ingress mode (it means "let HA's
+    session handle auth", not "no auth at all").
+  - `ports: 3000/tcp + 7456/tcp` set to `null` — no host-port
+    exposure.
+  - `schema.ingress_port` + `default.ingress_port: 3000` so the
+    supervisor knows what port our web listens on inside the
+    container (this was the v0.1.17 piece that didn't work; we
+    retry with the full set of config keys).
+- Known issue carried over from v0.1.17: the supervisor
+  `addons info` shows `ingress_port: 8099` (its own host port),
+  distinct from the container-side `default.ingress_port: 3000`
+  we set. The supervisor should connect to the container via the
+  container IP on port 3000 (our actual web listen). If ingress
+  still fails on install, the user should `ha supervisor restart`
+  before reinstalling to flush stale supervisor-side cache.
+
 ## 0.1.18 — 2026-06-13
 
 ### Changed
