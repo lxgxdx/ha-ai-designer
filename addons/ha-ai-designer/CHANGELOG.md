@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.10 — 2026-06-13
+
+### Fixed
+- v0.1.8 and v0.1.9 builds both failed at the runtime stage: the
+  Node 24 musl tarball URL we used
+  (`nodejs.org/dist/v24.0.0/node-v24.0.0-linux-x64-musl.tar.xz`)
+  returns 404. Node 24's dist directory no longer ships a
+  linux-x64-musl variant — only the glibc `linux-x64.tar.xz`.
+- Switched to **copying the Node 24 binary tree from the builder
+  stage** (which is `FROM node:24-alpine` and thus has the musl build
+  ready) into the runtime. Drop the tarball download entirely. We
+  leave the hassio-installed /usr/bin/node (v20) in place; /usr/local/bin
+  wins on PATH so the v24 binary takes over.
+- Reverted the v0.1.9 `rm -f /usr/bin/node` since it's no longer needed
+  and is a slightly risky thing to ship.
+
 ## 0.1.9 — 2026-06-13
 
 ### Fixed

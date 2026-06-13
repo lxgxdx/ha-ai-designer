@@ -85,24 +85,22 @@ RUN cp -r /build/apps/daemon/dist /out/daemon/dist
 FROM ${BUILD_FROM} AS runtime
 
 # hassio base 16 ships Node 20.15.1, but pnpm 9/10's bin shims and the
-# web build expect Node 20.18+ (and our builder stage is Node 24). Upgrade
-# to Node 24 to match the builder — this also fixes the
-# "SyntaxError: missing ) after argument list" in .bin/next (the shim
-# is an ESM file Node 20.15 mis-parses).
+# web build expect Node 20.18+ (and our builder stage is Node 24).
 #
-# Alpine's `n` install is flaky on hassio's read-only rootfs, so we go
-# straight to the official Node 24 musl tarball and overlay it onto
-# /usr/local (which is writable in the runtime stage). We also remove
-# the apk-installed /usr/bin/node so /usr/local/bin wins on PATH
-# (Alpine puts /usr/bin first by default, which otherwise shadows us).
-RUN apk add --no-cache --update libstdc++ \
-    && curl -fsSL https://nodejs.org/dist/v24.0.0/node-v24.0.0-linux-x64-musl.tar.xz \
-       | tar -xJ -C /usr/local --strip-components=1 \
-       --exclude=include \
-       --exclude=share \
-    && rm -f /usr/bin/node /usr/bin/npm /usr/bin/npx \
-    && hash -r \
-    && node --version && npm --version
+# We can't change the runtime base from hassio's — supervisor only
+# accepts add-ons derived from its base images. We also can't tarball
+# Node 24 from nodejs.org/dist because that directory no longer ships
+# a linux-x64-musl variant for v24 (Alpine is musl-based).
+#
+# Cleanest fix: copy the Node 24 binary tree from the builder stage
+# (which is `FROM node:24-alpine`) into the runtime. The /usr/local/bin
+# overlay wins on PATH even when /usr/bin/node is present, so we leave
+# the hassio-installed v20 in place as a no-op fallback.
+COPY --from=builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=builder /usr/local/bin/npm  /usr/local/bin/npm
+COPY --from=builder /usr/local/bin/npx /usr/local/bin/npx
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN hash -r && node --version && npm --version
 
 # Copy built artifacts
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
