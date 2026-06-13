@@ -89,6 +89,15 @@ EOF
   chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
 fi
 
+# 3.5. Kill any previous run's daemon/web processes. s6 restarts run.sh on
+#      crash, and each iteration would otherwise leave the previous
+#      daemon bound to 7456, causing EADDRINUSE on the next attempt.
+bashio::log.info "Cleaning up any previous daemon/web processes..."
+pkill -f 'node dist/server.js' 2>/dev/null || true
+pkill -f 'next start'         2>/dev/null || true
+pkill -f 'next-server'        2>/dev/null || true
+sleep 1
+
 # 4. Start the daemon (compiled JS — no tsx in production)
 bashio::log.info "Starting daemon on port ${HA_DAEMON_PORT}..."
 cd /opt/ha-ai-designer/apps/daemon || bashio::exit.nok "daemon dir missing"
@@ -98,9 +107,18 @@ DAEMON_PID=$!
 echo "${DAEMON_PID}" > "${DATA_DIR}/.pid.daemon" 2>/dev/null || true
 bashio::log.info "  daemon pid=${DAEMON_PID}"
 
-# 5. Start the web UI (Next.js default server)
+# 5. Start the web UI (Next.js default server).
+#    NOTE: we call `next` via its real entry (node_modules/next/dist/bin/next)
+#    rather than the .bin/next shim, because pnpm 9/10 generates the shim
+#    as a shell script that Node tries to parse as JS, which crashes with
+#    'SyntaxError: missing ) after argument list'. Using the dist entry
+#    directly bypasses the broken shim.
 bashio::log.info "Starting web UI on port ${HA_WEB_PORT}..."
 cd /opt/ha-ai-designer/apps/web || bashio::exit.nok "web dir missing"
+NEXT_ENTRY="/opt/ha-ai-designer/apps/web/node_modules/next/dist/bin/next"
+if [ ! -f "${NEXT_ENTRY}" ]; then
+  bashio::exit.nok "Next.js entry not found at ${NEXT_ENTRY}"
+fi
 nohup env \
   HOSTNAME=0.0.0.0 \
   HA_DAEMON_URL="http://127.0.0.1:${HA_DAEMON_PORT}" \
@@ -108,7 +126,7 @@ nohup env \
   HA_WEB_PORT="${HA_WEB_PORT}" \
   HA_DATA_DIR="${DATA_DIR}" \
   PORT="${HA_WEB_PORT}" \
-  node node_modules/.bin/next start -p "${HA_WEB_PORT}" \
+  node "${NEXT_ENTRY}" start -p "${HA_WEB_PORT}" \
   >> "${DATA_DIR}/logs/web.log" 2>&1 &
 WEB_PID=$!
 echo "${WEB_PID}" > "${DATA_DIR}/.pid.web" 2>/dev/null || true

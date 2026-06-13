@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.14 — 2026-06-13
+
+### Fixed
+- v0.1.13 got Node 24 working and the runtime started, but two
+  issues remained:
+  1. **web crashed with `SyntaxError: missing ) after argument list`
+     in `node_modules/.bin/next`.** pnpm 9/10's bin shim is a shell
+     script that Node tries to parse as JS, crashing on bash syntax.
+     (We thought this was a Node 20 vs Node 24 issue — turned out
+     to be the shim itself.) Fix: call Next.js's real entry directly,
+     `node node_modules/next/dist/bin/next start -p PORT`, bypassing
+     the broken shim.
+  2. **daemon crashed with `EADDRINUSE` on 7456.** s6 restarts
+     `run.sh` on crash, and each iteration left the previous daemon
+     bound to the port. Fix: at the start of run.sh, `pkill` any
+     `node dist/server.js`, `next start`, and `next-server` processes
+     from prior runs before starting new ones.
+- v0.1.13 had already delivered the rest (Node 24 + libstdc++ +
+  full /usr/local COPY). The remaining issues were all in run.sh.
+
 ## 0.1.13 — 2026-06-13
 
 ### Fixed
