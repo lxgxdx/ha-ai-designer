@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.12 — 2026-06-13
+
+### Fixed
+- v0.1.11 got Node 24 working (libstdc++ bump landed) but
+  `npm --version` then crashed with `MODULE_NOT_FOUND` — the
+  COPY of `/usr/local/lib/node_modules` from the builder stage
+  didn't actually carry npm's files (node:24-alpine's npm lives
+  under a path buildx doesn't preserve across the multi-stage
+  COPY). Reinstall npm globally in the runtime instead:
+  `npm install -g npm@10` so the runtime is self-sufficient and
+  we no longer depend on the builder's filesystem layout.
+
 ## 0.1.11 — 2026-06-13
 
 ### Fixed

@@ -98,12 +98,18 @@ FROM ${BUILD_FROM} AS runtime
 # with libstdc++ 13 (older C++ ABI), and the Node 24 binary needs
 # symbols from a newer libstdc++ (it was built against v14+). Just
 # `apk add libstdc++` pulls the newest available, which is enough.
+#
+# We then reinstall npm globally because copying the npm install dir
+# from builder doesn't always work (node:24-alpine's npm files end up
+# at a different relative path than /usr/local/lib/node_modules/npm/).
 RUN apk add --no-cache libstdc++
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=builder /usr/local/bin/npm  /usr/local/bin/npm
 COPY --from=builder /usr/local/bin/npx /usr/local/bin/npx
-COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN hash -r && node --version && npm --version
+RUN hash -r \
+    && node --version \
+    && npm install -g npm@10 \
+    && npm --version
 
 # Copy built artifacts
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
