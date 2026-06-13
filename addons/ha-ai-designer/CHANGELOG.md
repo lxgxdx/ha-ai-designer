@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.8 — 2026-06-13
+
+### Fixed
+- v0.1.7's runtime stage was still on Node 20.15.1 — `n 24` failed
+  silently (can't write to /usr/local/n on hassio's read-only rootfs),
+  so the symlinks to /usr/local/bin/node pointed at nothing. web
+  crashed with `SyntaxError: missing ) after argument list` and
+  daemon crashed with `EADDRINUSE` from a previous run's orphan.
+- Switch to installing Node 24 via the **official musl tarball** from
+  nodejs.org, overlaid directly on `/usr/local`. No `n` indirection.
+- Also removed a duplicate `COPY --from=builder` block that had crept
+  in from earlier edits.
+
 ## 0.1.7 — 2026-06-13
 
 ### Fixed

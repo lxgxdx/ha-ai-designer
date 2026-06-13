@@ -89,23 +89,16 @@ FROM ${BUILD_FROM} AS runtime
 # to Node 24 to match the builder — this also fixes the
 # "SyntaxError: missing ) after argument list" in .bin/next (the shim
 # is an ESM file Node 20.15 mis-parses).
-RUN apk add --no-cache --update nodejs npm \
-    && npm install -g n \
-    && n 24 \
-    && rm -rf /usr/local/bin/node /usr/local/bin/npm \
-    && ln -sf /usr/local/n/versions/node/24/bin/node /usr/local/bin/node \
-    && ln -sf /usr/local/n/versions/node/24/bin/npm /usr/local/bin/npm \
-    && hash -r \
+#
+# Alpine's `n` install is flaky on hassio's read-only rootfs, so we go
+# straight to the official Node 24 musl tarball and overlay it onto
+# /usr/local (which is writable in the runtime stage).
+RUN apk add --no-cache --update libstdc++ \
+    && curl -fsSL https://nodejs.org/dist/v24.0.0/node-v24.0.0-linux-x64-musl.tar.xz \
+       | tar -xJ -C /usr/local --strip-components=1 \
+       --exclude=include \
+       --exclude=share \
     && node --version && npm --version
-
-# Install pnpm at runtime too (needed for the daemon `pnpm install`).
-# pnpm isn't strictly needed at runtime if we COPY a pre-built
-# node_modules — but daemon's install above uses pnpm, so we need it
-# in the builder stage only. Skip pnpm in runtime.
-
-# Copy built artifacts
-COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
-COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 
 # Copy built artifacts
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
