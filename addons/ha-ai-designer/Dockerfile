@@ -74,12 +74,12 @@ RUN cp -r /build/apps/web/public /out/web/public 2>/dev/null || true
 RUN cp /build/apps/web/next.config.mjs /out/web/
 
 # Daemon: tsc-compiled JS is NOT self-contained — needs node_modules at
-# runtime (cors, express, ws, pino, etc.). Copy package.json + run a fresh
-# `--prod` install into the deploy dir.
-RUN mkdir -p /out/daemon
+# runtime (cors, express, ws, pino, etc.). Use pnpm deploy (same approach
+# as web) so we get a self-contained production tree that includes
+# package.json + node_modules + dist.
+RUN cd /build && pnpm --filter @ha-designer/daemon deploy --prod --legacy /out/daemon
+RUN rm -rf /out/daemon/dist
 RUN cp -r /build/apps/daemon/dist /out/daemon/dist
-RUN cp /build/apps/daemon/package.json /out/daemon/
-RUN cd /out/daemon && pnpm install --prod --ignore-scripts --legacy
 
 # -------- Stage 2: runtime (hassio base + Node.js) --------
 FROM ${BUILD_FROM} AS runtime

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 — 2026-06-13
+
+### Fixed
+- v0.1.6 builder stage failed: `pnpm install --prod` in /out/daemon
+  had no lockfile (we only copied package.json). Replaced with
+  `pnpm deploy --prod --legacy` (same approach as web) which produces
+  a self-contained production tree with package.json + node_modules +
+  dist already in place. dist/ is then overwritten with the freshly
+  built copy (deploy's own dist is empty since tsc has no scripts key).
+
 ## 0.1.6 — 2026-06-13
 
 ### Fixed
