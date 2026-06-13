@@ -1,6 +1,30 @@
 # Changelog
 
-## 0.1.15 — 2026-06-13
+## 0.1.16 — 2026-06-13
+
+### Changed
+- Switched the add-on from **ingress mode** to **port mode**:
+  - `ingress: false` (was `true`)
+  - Ports `7456/tcp` and `3000/tcp` are now explicitly mapped to
+    the same host ports (was `null`).
+  - Removed the `ingress_port` field from the schema (no longer
+    meaningful when ingress is off).
+
+### Why
+- v0.1.15 had the supervisor caching a stale ingress port (8099)
+  that didn't match what the web UI was actually listening on
+  (3000). Even with the schema/default fix, the supervisor's
+  `Ingress for ... not available` + `Cannot connect to
+  172.30.33.9:8099` errors persisted.
+- User verified that the web itself was fully working (HTTP 200,
+  ChatPane served, daemon /api/health OK) — it was purely the
+  ingress proxy layer failing.
+- Port mode is simpler: HA browser just navigates to
+  `http://<ha-host>:3000/` directly. The trade-off is no automatic
+  X-Frame-Options loosening, but we already document how to access
+  the UI and the dev experience is the same.
+
+## 0.1.15 — 202-06-13
 
 ### Fixed
 - v0.1.14 ran daemon + web fine inside the container, but the

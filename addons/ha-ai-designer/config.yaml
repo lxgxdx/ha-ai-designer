@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.1.15"
+version: "0.1.16"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -19,23 +19,22 @@ hassio_role: default
 homeassistant_api: true
 host_network: false
 auth: false
-ingress: true
+ingress: false
 panel_icon: "mdi:robot"
 panel_title: "AI Designer"
 panel_admin: true
 ports:
-  "7456/tcp": null
-  "3000/tcp": null
+  "7456/tcp": 7456
+  "3000/tcp": 3000
 ports_description:
-  "7456/tcp": "daemon REST API (internal; prefer ingress)"
-  "3000/tcp": "web UI (internal; prefer ingress)"
+  "7456/tcp": "daemon REST API"
+  "3000/tcp": "web UI (Next.js)"
 discovery:
   - ha_ai_designer
 services:
   - "mqtt:need"
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
-  ingress_port: "port"
   data_dir: "str"
   llm_provider: "list(minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom)"
   llm_base_url: "url"
