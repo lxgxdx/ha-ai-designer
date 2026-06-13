@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 — 2026-06-13
+
+### Fixed
+- **daemon crashes with `ERR_MODULE_NOT_FOUND: 'cors'`** on first run.
+  v0.1.5 (and earlier) only copied `dist/` + `package.json` into the
+  runtime image, forgetting that tsc does not bundle dependencies.
+  Dockerfile now runs `pnpm install --prod` against the copied
+  package.json so daemon gets a production node_modules tree.
+- **web crashes with `SyntaxError: missing ) after argument list` in
+  `.bin/next`.** hassio base 16 ships Node 20.15.1 which mis-parses the
+  pnpm 9/10 ESM bin shim. Dockerfile now upgrades the runtime to
+  Node 24 (matches the builder stage) via `n 24`.
+
 ## 0.1.5 — 2026-06-13
 
 ### Fixed

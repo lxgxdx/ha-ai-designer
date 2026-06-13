@@ -73,16 +73,39 @@ RUN cp -r /build/apps/web/.next /out/web/
 RUN cp -r /build/apps/web/public /out/web/public 2>/dev/null || true
 RUN cp /build/apps/web/next.config.mjs /out/web/
 
-# Daemon: tsc-compiled JS is self-contained.
+# Daemon: tsc-compiled JS is NOT self-contained — needs node_modules at
+# runtime (cors, express, ws, pino, etc.). Copy package.json + run a fresh
+# `--prod` install into the deploy dir.
 RUN mkdir -p /out/daemon
 RUN cp -r /build/apps/daemon/dist /out/daemon/dist
 RUN cp /build/apps/daemon/package.json /out/daemon/
+RUN cd /out/daemon && pnpm install --prod --ignore-scripts --legacy
 
 # -------- Stage 2: runtime (hassio base + Node.js) --------
 FROM ${BUILD_FROM} AS runtime
 
-# hassio base is Alpine-based; install Node.js.
-RUN apk add --no-cache --update nodejs && node --version
+# hassio base 16 ships Node 20.15.1, but pnpm 9/10's bin shims and the
+# web build expect Node 20.18+ (and our builder stage is Node 24). Upgrade
+# to Node 24 to match the builder — this also fixes the
+# "SyntaxError: missing ) after argument list" in .bin/next (the shim
+# is an ESM file Node 20.15 mis-parses).
+RUN apk add --no-cache --update nodejs npm \
+    && npm install -g n \
+    && n 24 \
+    && rm -rf /usr/local/bin/node /usr/local/bin/npm \
+    && ln -sf /usr/local/n/versions/node/24/bin/node /usr/local/bin/node \
+    && ln -sf /usr/local/n/versions/node/24/bin/npm /usr/local/bin/npm \
+    && hash -r \
+    && node --version && npm --version
+
+# Install pnpm at runtime too (needed for the daemon `pnpm install`).
+# pnpm isn't strictly needed at runtime if we COPY a pre-built
+# node_modules — but daemon's install above uses pnpm, so we need it
+# in the builder stage only. Skip pnpm in runtime.
+
+# Copy built artifacts
+COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
+COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 
 # Copy built artifacts
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
