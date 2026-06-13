@@ -85,7 +85,21 @@ export function ChatPane(): React.ReactElement {
   const [iframePolicy, setIframePolicy] = useState<IframePolicy | null>(null);
   const [iframeLoaded, setIframeLoaded] = useState(false);
 
-  const daemonUrl = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
+  // v0.2.0: streaming LLM output. The brief produces a stream of
+  // text-event-stream chunks; we accumulate them into `streamedText` so
+  // the user sees the LLM thinking in real time instead of staring at a
+  // blank box for 2–8 seconds. Once the `done` event arrives the
+  // `result` state is populated with the parsed LovelaceConfig.
+  const [streamedText, setStreamedText] = useState('');
+  const [streamStatus, setStreamStatus] = useState<'idle' | 'streaming'>('idle');
+
+  // v0.2.0: every daemon call goes through the same-origin Next.js
+  // catch-all proxy at /api/daemon/* (apps/web/src/app/api/daemon/[...path]/route.ts),
+  // which attaches the X-Addon-Internal-Token header. The browser
+  // itself can never reach http://127.0.0.1:7456 (container-internal
+  // loopback), so this is the only way /api/chat etc. actually work
+  // from the user's browser — even in add-on mode.
+  const daemonUrl = '/api/daemon';
 
   // Load backups on mount + after every successful push (the new one
   // is added to the list).
@@ -123,23 +137,76 @@ export function ChatPane(): React.ReactElement {
     setError(null);
     setPreview(null);
     setRestoreResult(null);
+    setResult(null);
+    setStreamedText('');
+    setStreamStatus('streaming');
     startTransition(async () => {
       try {
         const res = await fetch(`${daemonUrl}/api/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify({ brief }),
         });
-        const json = (await res.json()) as ChatResult;
-        if (!res.ok || !json.ok) {
-          setError(json.message ?? `HTTP ${res.status}`);
-          setResult(null);
+        if (!res.ok || !res.body) {
+          setStreamStatus('idle');
+          setError(`HTTP ${res.status}`);
           return;
         }
-        setResult(json);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalResult: ChatResult | null = null;
+        let gotDone = false;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // SSE events are separated by a blank line (\n\n). Split and
+          // keep the trailing partial chunk in `buffer`.
+          const events = buffer.split('\n\n');
+          buffer = events.pop() ?? '';
+          for (const ev of events) {
+            let eventName = 'message';
+            let dataStr = '';
+            for (const line of ev.split('\n')) {
+              if (line.startsWith('event:')) eventName = line.slice(6).trim();
+              else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+            }
+            if (!dataStr) continue;
+            let payload: {
+              ok?: boolean;
+              chunk?: string;
+              config?: unknown;
+              yaml?: string;
+              meta?: ChatResult['meta'];
+              warnings?: string[];
+              message?: string;
+            };
+            try { payload = JSON.parse(dataStr); } catch { continue; }
+            if (eventName === 'llm-chunk' && typeof payload.chunk === 'string') {
+              setStreamedText((prev) => prev + payload.chunk!);
+            } else if (eventName === 'done' && payload.ok) {
+              finalResult = {
+                ok: true,
+                config: payload.config,
+                yaml: payload.yaml,
+                meta: payload.meta,
+                warnings: payload.warnings,
+              };
+              gotDone = true;
+            } else if (eventName === 'error' || payload.ok === false) {
+              setError(payload.message ?? 'LLM 编排失败');
+            }
+          }
+        }
+        if (finalResult) setResult(finalResult);
+        if (!gotDone && !finalResult) {
+          setError('stream ended without a done event');
+        }
+        setStreamStatus('idle');
       } catch (e) {
+        setStreamStatus('idle');
         setError((e as Error).message);
-        setResult(null);
       }
     });
   }
@@ -264,6 +331,11 @@ export function ChatPane(): React.ReactElement {
           >
             {isPending ? '生成中…（约 30-60 秒）' : '生成 dashboard 草稿'}
           </button>
+          {streamStatus === 'streaming' && (
+            <span style={{ color: 'var(--text-dim)', fontSize: 13, alignSelf: 'center' }}>
+              ⏳ 实时流式生成中…（{streamedText.length} 字符已收）
+            </span>
+          )}
           {result && (
             <span style={{ color: 'var(--text-dim)', fontSize: 13, alignSelf: 'center' }}>
               {result.meta?.skillName} · {result.meta?.entitiesIncluded} 实体
@@ -272,6 +344,34 @@ export function ChatPane(): React.ReactElement {
           )}
         </div>
       </section>
+
+      {streamStatus === 'streaming' && (
+        <section
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            padding: 16,
+          }}
+        >
+          <h3 style={{ margin: '0 0 8px', fontSize: 14, color: 'var(--text-dim)' }}>
+            LLM 实时输出
+          </h3>
+          <pre
+            style={{
+              margin: 0,
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontSize: 13,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 320,
+              overflowY: 'auto',
+            }}
+          >
+            {streamedText}
+          </pre>
+        </section>
+      )}
 
       {error && (
         <section

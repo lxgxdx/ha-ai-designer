@@ -53,6 +53,13 @@ export interface ChatRequest {
   max_tokens?: number;
   /** If true, returns a ReadableStream<Uint8Array> of the SSE response. */
   stream?: boolean;
+  /**
+   * Optional AbortSignal. v0.2.0: the chat route wires an AbortController
+   * triggered by `req.on('close', ...)` so a browser-side disconnect
+   * cancels the in-flight LLM HTTP request instead of running it to
+   * completion (which wastes tokens + adds latency for nothing).
+   */
+  signal?: AbortSignal;
 }
 
 export interface ChatResponseChoice {
@@ -154,6 +161,9 @@ export async function chatStream(req: ChatRequest): Promise<ReadableStream<Uint8
     method: 'POST',
     headers,
     body: JSON.stringify({ ...req, model: cfg.model, stream: true }),
+    // Forward the AbortSignal so the caller (chat route) can cancel
+    // the in-flight LLM HTTP request on client disconnect.
+    signal: req.signal,
   });
 
   if (!res.ok || !res.body) {

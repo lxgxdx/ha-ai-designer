@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.2.0 — 2026-06-13
+
+### Added
+- **`/api/chat` SSE streaming** (low-latency UX). Previously the
+  endpoint was a non-streaming POST that returned the parsed
+  LovelaceConfig only after the full LLM reply landed (2–8 s of
+  blank box). v0.2.0 introduces `orchestrateStream()` which forwards
+  LLM token deltas as `event: llm-chunk` SSE frames so the browser
+  can render output as it's generated, plus `event: yaml-extracted`
+  / `event: validated` / `event: done` for the post-processing stages.
+  The legacy JSON path is preserved under `?stream=0` for smoke /
+  curl scripts.
+- **First-run setup wizard** at `/setup`. New `apps/web/src/app/setup/page.tsx`
+  walks the user through two forms:
+    1. Home Assistant: baseUrl + Long-Lived Access Token — submitted
+       via `POST /api/ha/config`, then verified with `GET /api/ha/ping`.
+    2. LLM BYOK: provider (8 presets incl. MiniMax / OpenAI /
+       Anthropic / Qwen / Zhipu / Moonshot / Ollama / custom) +
+       baseUrl + model + apiKey — submitted via `POST /api/llm/config`
+       and verified with `POST /api/llm/test`.
+  Both steps gate the "next" button on a successful test. The
+  home `/` page now redirects to `/setup` whenever the daemon reports
+  either LLM or HA as un-configured (or unreachable), so fresh
+  installs land on the wizard rather than a confusing blank page.
+- **Same-origin daemon proxy**. `apps/web/src/app/api/daemon/[...path]/route.ts`
+  is a Next.js catch-all that forwards every browser request to
+  `http://127.0.0.1:7456/<path>` with the `X-Addon-Internal-Token`
+  header attached. ChatPane.tsx now uses `/api/daemon/api/...` for
+  every daemon call instead of trying to reach `127.0.0.1:7456`
+  directly from the browser (which never worked — the daemon
+  listens on container-internal loopback). The streaming SSE
+  pass-through uses the same proxy, with `X-Accel-Buffering: no`
+  set on both sides to defeat ingress response buffering.
+- **ChatPane streaming UI**. The "生成" button now displays a live
+  "⏳ 实时流式生成中…（N 字符已收）" indicator and a scrolling
+  `<pre>` panel showing the LLM's accumulating output. After
+  `event: done` fires, the result panel + apply-to-main button
+  appear as before.
+
+### Security
+- **FAILSAFE_SCHEMA for LLM YAML deserialization**. `js-yaml`'s
+  default schema accepts `!!js/function` and friends — a prompt-
+  injection-via-brief could in principle have the LLM smuggle in
+  a YAML tag that runs arbitrary JS at parse time. v0.2.0 changes
+  both `yaml.load()` call sites in `llm-orchestrator.ts` to use
+  `yaml.load(text, { schema: yaml.FAILSAFE_SCHEMA })`, which only
+  accepts the four primitive types (string, number, boolean, null)
+  — all a LovelaceConfig ever needs.
+
+### Verified
+- v0.1.22 fixes still hold: SSRF guard rejects loopback / IMDS /
+  RFC1918, web→daemon auth middleware accepts loopback + correct
+  token, health probe exempt.
+- New: `POST /api/chat` with `Accept: text/event-stream` returns
+  a `text/event-stream` response whose first frame is an
+  `event: llm-chunk`; chunks stream in as the LLM produces them;
+  the final `event: done` carries the parsed LovelaceConfig +
+  yaml + meta + warnings.
+- New: visiting `/` on a fresh install (no `data/config.json`)
+  redirects to `/setup`; completing the wizard and returning to
+  `/` shows the home view.
+
 ## 0.1.22 — 2026-06-13
 
 ### Security

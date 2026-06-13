@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.1.22"
+version: "0.2.0"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.

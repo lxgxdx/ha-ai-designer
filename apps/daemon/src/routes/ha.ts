@@ -24,6 +24,7 @@ import {
 } from '../ha-client.js';
 import { haWsRequest } from '../ha-ws-client.js';
 import { logger } from '../logger.js';
+import { ensurePublicBaseUrl } from '../url-safety.js';
 import type { HaEntity, LovelaceConfig } from '@ha-designer/contracts';
 
 interface WsDashboardMeta {
@@ -289,6 +290,24 @@ export function createHaRouter(): Router {
     }
     if (!/^https?:\/\//.test(body.baseUrl)) {
       return res.status(400).json({ ok: false, message: 'baseUrl must start with http:// or https://' });
+    }
+    // v0.2.0 SSRF guard: this endpoint stores a long-lived HA access token
+    // and then the daemon forwards that token (as `Authorization: Bearer ...`)
+    // to the saved baseUrl on every HA request. Without this guard a user-
+    // supplied `http://169.254.169.254/...` (cloud metadata) or
+    // `http://attacker.example/...` would exfiltrate the HA token on the
+    // very next /api/ha/ping or /api/chat call. validatePublicBaseUrl
+    // rejects loopback, link-local, RFC1918, and cloud-metadata IPs.
+    {
+      const v = await ensurePublicBaseUrl('ha.config', body.baseUrl);
+      if (!v.ok) {
+        return res.status(400).json({
+          ok: false,
+          code: 'PRIVATE_HOST_BLOCKED',
+          message: `baseUrl rejected: ${v.reason}. ` +
+            `Set HA_LLM_ALLOW_PRIVATE_HOSTS=1 to allow (development only).`,
+        });
+      }
     }
     try {
       const fs = await import('node:fs/promises');

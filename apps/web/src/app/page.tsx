@@ -1,11 +1,12 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 
 /**
- * Entry view — v0.1 skeleton.
+ * Entry view — v0.2.0.
  *
- * Goal: prove the lifecycle is wired (web reachable, daemon reachable).
- * Goal: surface the connect-HA flow as the next obvious step, even though
- *       the actual connect button is disabled until v0.2.
+ * First-time setup gate: if neither HA nor LLM is configured, redirect
+ * the user to /setup. Once both are set, render the dashboard home
+ * (daemon health snapshot + chat shortcut + next-step roadmap).
  */
 
 // Don't statically pre-render this page: the daemon isn't running during
@@ -14,22 +15,20 @@ import Link from 'next/link';
 // similar.
 export const dynamic = 'force-dynamic';
 
+const DAEMON = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
+const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  return { ...(extra ?? {}), ...(TOKEN ? { 'X-Addon-Internal-Token': TOKEN } : {}) };
+}
+
 async function fetchDaemonHealth(): Promise<{
   ok: boolean;
   data?: unknown;
   error?: string;
 }> {
-  const url = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
-  // v0.1.22: the daemon now requires X-Addon-Internal-Token on every
-  // non-health request. /api/health itself is open, but we still send
-  // the token when present so the same fetch helper can be reused for
-  // any other future endpoint without forgetting the header.
-  const headers: Record<string, string> = {};
-  if (process.env.HA_DAEMON_TOKEN) {
-    headers['X-Addon-Internal-Token'] = process.env.HA_DAEMON_TOKEN;
-  }
   try {
-    const res = await fetch(`${url}/api/health`, { cache: 'no-store', headers });
+    const res = await fetch(`${DAEMON}/api/health`, { cache: 'no-store', headers: authHeaders() });
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };
     }
@@ -39,8 +38,52 @@ async function fetchDaemonHealth(): Promise<{
   }
 }
 
+interface SetupStatus {
+  llmConfigured: boolean;
+  haConfigured: boolean;
+}
+
+/**
+ * Probe whether the wizard has been completed. We hit the daemon
+ * directly (not through /api/daemon/*) because this is a server
+ * component, not a browser fetch.
+ */
+async function fetchSetupStatus(): Promise<SetupStatus> {
+  let llmConfigured = false;
+  let haConfigured = false;
+  try {
+    const r = await fetch(`${DAEMON}/api/llm/config`, {
+      cache: 'no-store',
+      headers: authHeaders(),
+    });
+    if (r.ok) {
+      const j = (await r.json()) as { configured?: boolean };
+      llmConfigured = j.configured === true;
+    }
+  } catch { /* leave false */ }
+  try {
+    const r = await fetch(`${DAEMON}/api/ha/ping`, {
+      cache: 'no-store',
+      headers: authHeaders(),
+    });
+    if (r.ok) {
+      const j = (await r.json()) as { ok?: boolean };
+      haConfigured = j.ok === true;
+    }
+  } catch { /* leave false */ }
+  return { llmConfigured, haConfigured };
+}
+
 export default async function HomePage(): Promise<React.ReactElement> {
-  const health = await fetchDaemonHealth();
+  const [health, setup] = await Promise.all([fetchDaemonHealth(), fetchSetupStatus()]);
+
+  // v0.2.0: gate the home page on the wizard. If either HA or LLM
+  // isn't configured, the user hasn't finished setup yet — route
+  // them there. (We tolerate daemon-down as "not configured" so
+  // fresh installs land on the wizard rather than a scary error page.)
+  if (!setup.llmConfigured || !setup.haConfigured || !health.ok) {
+    redirect('/setup');
+  }
 
   return (
     <main
@@ -58,8 +101,16 @@ export default async function HomePage(): Promise<React.ReactElement> {
           HA AI Designer
         </h1>
         <p style={{ margin: 0, color: 'var(--text-dim)', fontSize: 16 }}>
-          本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。v0.1 骨架 — 下一步：
-          连接 HA → 拉实体 → 生成卡片 YAML → 推回 HA。
+          本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。
+          描述你想要的 dashboard 样式，AI 会拉你的实体、生成 YAML、推回 HA。
+        </p>
+        <p style={{ margin: '8px 0 0' }}>
+          <Link href="/chat" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+            打开设计工作台 →
+          </Link>
+          <span style={{ marginLeft: 16, color: 'var(--text-dim)' }}>
+            <Link href="/setup" style={{ color: 'inherit' }}>重新配置</Link>
+          </span>
         </p>
       </header>
 
@@ -75,15 +126,9 @@ export default async function HomePage(): Promise<React.ReactElement> {
         }}
       >
         <h2 style={{ margin: 0, fontSize: 18 }}>守护进程状态</h2>
-        {health.ok ? (
-          <pre style={{ margin: 0, padding: 12, background: '#0b1220', borderRadius: 6 }}>
-            {JSON.stringify(health.data, null, 2)}
-          </pre>
-        ) : (
-          <p style={{ margin: 0, color: 'var(--err)' }}>
-            无法连接 daemon：{health.error}。检查 <code>pnpm tools-dev status</code>。
-          </p>
-        )}
+        <pre style={{ margin: 0, padding: 12, background: '#0b1220', borderRadius: 6 }}>
+          {JSON.stringify(health.data, null, 2)}
+        </pre>
       </section>
 
       <section
@@ -97,19 +142,15 @@ export default async function HomePage(): Promise<React.ReactElement> {
           gap: 12,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 18 }}>下一步</h2>
+        <h2 style={{ margin: 0, fontSize: 18 }}>路线图</h2>
         <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8, color: 'var(--text-dim)' }}>
-          <li>v0.2 — HA 接入：填 URL + Long-Lived Token → 拉实体列表</li>
-          <li>v0.3 — RAG 知识库：HA 内置卡片 + 主流 HACS 卡片</li>
-          <li>v0.4 — LLM 接入：BYOK 代理 + 结构化输出</li>
-          <li>v0.5 — 实时预览 iframe</li>
-          <li>v0.6 — Tweaks 滑块</li>
-          <li>v0.7 — 一键推回 HA + 自动备份</li>
+          <li>v0.2 — HA 接入 wizard + /api/chat SSE streaming（当前版本）</li>
+          <li>v0.3 — RAG 知识库：hha-knowledge 51 张 HA 卡片 + HACS 卡片入 orchestrator</li>
+          <li>v0.4 — 实时预览 iframe + Tweaks 滑块</li>
+          <li>v0.5 — 多 dashboard 覆盖（非 default storage / YAML 模式）</li>
+          <li>v0.6 — 错误恢复 + 离线容忍 + entity 缓存</li>
+          <li>v0.7 — HACS / Add-on 商店上架 + i18n</li>
         </ol>
-        <p style={{ marginTop: 8, color: 'var(--text-dim)' }}>
-          仓库结构与开发规则见 <Link href="/about">关于页</Link>（待补）。架构细节见
-          <code> docs/architecture.md</code>。
-        </p>
       </section>
     </main>
   );

@@ -13,11 +13,10 @@ import type { Request, Response, Router } from 'express';
 import express from 'express';
 import { join, resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
-import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import { loadConfig, LlmConfig } from '../ha-client.js';
 import { chat } from '../llm-client.js';
 import { logger } from '../logger.js';
+import { ensurePublicBaseUrl, isPrivateHostBypassEnabled } from '../url-safety.js';
 
 interface AppConfig {
   ha?: { baseUrl: string; token: string };
@@ -25,92 +24,12 @@ interface AppConfig {
 }
 
 /**
- * Returns true for IPv4 addresses in private/loopback/link-local/
- * unspecified ranges, including the cloud-metadata address
- * 169.254.169.254 (AWS / GCP / Azure IMDS).
+ * v0.2.0: SSRF guard helpers (validatePublicBaseUrl, ensurePublicBaseUrl,
+ * isPrivateHostBypassEnabled, IP-range predicates) are factored out
+ * into ./url-safety.js so the same guard can protect /api/ha/config
+ * (which forwards a Bearer HA token to a user-supplied baseUrl) and
+ * any future user-supplied URL endpoint.
  */
-function isPrivateIPv4(ip: string): boolean {
-  const p = ip.split('.').map(Number);
-  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
-  // We've validated length === 4 above, so each p[i] is a number under
-  // noUncheckedIndexedAccess. Use non-null assertions to keep the type
-  // checker happy without disabling the option.
-  const [a, b] = p as unknown as [number, number, number, number];
-  if (a === 10) return true;                  // 10/8         RFC1918
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16/12
-  if (a === 192 && b === 168) return true;    // 192.168/16
-  if (a === 127) return true;                 // 127/8        loopback
-  if (a === 169 && b === 254) return true;    // 169.254/16   link-local + IMDS
-  if (a === 0) return true;                   // 0/8          "this network"
-  if (a >= 224) return true;                  // 224/4        multicast + reserved
-  return false;
-}
-
-/** Returns true for IPv6 loopback / link-local / ULA / multicast / unspecified. */
-function isPrivateIPv6(ip: string): boolean {
-  // split('%')[0] under noUncheckedIndexedAccess is string | undefined;
-  // the array always has at least one element so the non-null assertion
-  // is safe.
-  const lc = ip.toLowerCase().split('%')[0]!;
-  if (lc === '::' || lc === '::1') return true;  // unspecified / loopback
-  if (/^fe[89ab][0-9a-f]:/i.test(lc)) return true; // fe80::/10 link-local
-  if (/^f[cd]/i.test(lc)) return true;           // fc00::/7     ULA
-  if (/^ff/i.test(lc)) return true;              // ff00::/8     multicast
-  if (/^2001:db8:/i.test(lc)) return true;       // documentation
-  return false;
-}
-
-function isPrivateOrLoopbackIP(ip: string): boolean {
-  const v = isIP(ip);
-  if (v === 4) return isPrivateIPv4(ip);
-  if (v === 6) return isPrivateIPv6(ip);
-  return true;                                   // unknown family → reject
-}
-
-/**
- * Validate that `url` points at a publicly routable host. Resolves
- * hostnames via DNS; rejects if ANY resolved address is in a
- * private/loopback/link-local/cloud-metadata range. Catches the
- * common "DNS-rebinding to localhost" attack: if the user supplies
- * a hostname that resolves to 127.0.0.1, 10.x.x.x, 169.254.169.254,
- * etc., we reject the request.
- */
-async function validatePublicBaseUrl(url: string): Promise<{ ok: boolean; reason?: string }> {
-  let u: URL;
-  try { u = new URL(url); } catch { return { ok: false, reason: 'invalid URL' }; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    return { ok: false, reason: `unsupported protocol: ${u.protocol}` };
-  }
-  const host = u.hostname;                        // strips IPv6 brackets
-  if (isIP(host)) {
-    return isPrivateOrLoopbackIP(host)
-      ? { ok: false, reason: `IP ${host} is in a private/loopback/link-local range` }
-      : { ok: true };
-  }
-  let addrs: { address: string; family: number }[];
-  try {
-    addrs = await lookup(host, { all: true });
-  } catch (e) {
-    return { ok: false, reason: `DNS resolution failed for ${host}: ${(e as Error).message}` };
-  }
-  if (addrs.length === 0) {
-    return { ok: false, reason: `no DNS records for ${host}` };
-  }
-  for (const a of addrs) {
-    if (isPrivateOrLoopbackIP(a.address)) {
-      return {
-        ok: false,
-        reason: `hostname ${host} resolves to ${a.address} (private/loopback/link-local)`,
-      };
-    }
-  }
-  return { ok: true };
-}
-
-/** Dev-only bypass for the SSRF guard (e.g. local ollama on 127.0.0.1). */
-function isPrivateHostBypassEnabled(): boolean {
-  return process.env.HA_LLM_ALLOW_PRIVATE_HOSTS === '1';
-}
 
 const KNOWN_PROVIDERS: Record<string, { baseUrl: string; defaultModel: string }> = {
   openai: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o' },
@@ -183,10 +102,9 @@ export function createLlmRouter(): Router {
     // v0.1.22 SSRF guard: refuse baseUrls that resolve to private/loopback
     // addresses (loopback, RFC1918, link-local incl. cloud metadata, ULA).
     // Dev-only bypass: HA_LLM_ALLOW_PRIVATE_HOSTS=1.
-    if (!isPrivateHostBypassEnabled()) {
-      const v = await validatePublicBaseUrl(body.baseUrl);
+    {
+      const v = await ensurePublicBaseUrl('llm.config', body.baseUrl);
       if (!v.ok) {
-        logger.warn({ baseUrl: body.baseUrl, reason: v.reason }, 'llm config rejected: private/loopback host');
         return res.status(400).json({
           ok: false,
           code: 'PRIVATE_HOST_BLOCKED',
@@ -222,10 +140,9 @@ export function createLlmRouter(): Router {
     // using it for the test call. Without this an authenticated user could
     // /api/llm/test { baseUrl: "http://169.254.169.254/..." } and probe
     // cloud metadata even when a perfectly valid LLM is configured.
-    if (body.baseUrl && !isPrivateHostBypassEnabled()) {
-      const v = await validatePublicBaseUrl(body.baseUrl);
+    if (body.baseUrl) {
+      const v = await ensurePublicBaseUrl('llm.test', body.baseUrl);
       if (!v.ok) {
-        logger.warn({ baseUrl: body.baseUrl, reason: v.reason }, 'llm test override rejected: private/loopback host');
         return res.status(400).json({
           ok: false,
           code: 'PRIVATE_HOST_BLOCKED',

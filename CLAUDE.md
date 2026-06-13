@@ -85,6 +85,10 @@ CI（`.github/workflows/build-addon.yml`）：
 14. **Dockerfile runtime 阶段要 COPY orchestrator 读的所有 host-side 资源** —— `skills/`、`design-systems/`、`craft/`、`config/*.example.json` 等。**build context 是仓库根**，可以直接 `COPY skills /opt/ha-ai-designer/skills`，不用 `--from=builder`。配合 `HA_REPO_ROOT` 环境变量让 orchestrator 找到。
 15. **接受 user-supplied URL 的 endpoint 必有 SSRF 校验** —— LLM BYOK / webhook / OAuth redirect / 任意"用户填 URL"路径都得 resolve hostname + reject 私网/loopback/link-local/cloud-metadata IP 段（`169.254.169.254` IMDS 是最常被忽略的）。`HA_LLM_ALLOW_PRIVATE_HOSTS=1` 之类的 dev-only bypass env 必带清晰 warn-level log。**只**用字符串 prefix check（"hostname 不以 10. 开头就 OK"）**不**够，必须做 DNS 解析。
 16. **内部服务间 HTTP 必带 token** —— 即使都在 loopback 也必带（防同 Docker network 邻居容器 / 误开 host_network）。daemon 起服务时生成 `crypto.randomBytes(32).toString('base64url')` 写到 `${DATA_DIR}/.daemon-token` (mode 0600)，middleware 用 constant-time compare 校验 `X-Addon-Internal-Token` header；run.sh 把 token 通过 env 传给上游 web 进程。**loopback host check 是 belt，token 是 suspenders**——两件都要。
+17. **从不可信源（LLM 输出 / 用户上传 / 第三方 API）反序列化 YAML 必须 `FAILSAFE_SCHEMA`** —— `js-yaml` 默认 schema 接受 `!!js/function: 'malicious code'` 这种 tag，**会执行任意 JS**。LovelaceConfig / data dump / config 文件**只**需要 string/number/bool/null/seq/map，**必**用 `yaml.load(text, { schema: yaml.FAILSAFE_SCHEMA })`。
+18. **SSE 响应必设 `X-Accel-Buffering: no`** —— HA supervisor 走 nginx-like 反代，**默认按 `proxy_buffer_size` 缓存响应**才推给客户端，**streaming 直接被废**（变全量等响应完才返回）。`add-on` 模式 ingress 也走类似反代。**两端都设**：daemon 返的 SSE 头 + Next.js proxy 透传的头。
+19. **Next.js API route 透传 SSE** —— 不要 `await res.json()` / `await res.text()`，直接 `new Response(upstream.body, { headers })` 把 ReadableStream 透传。`runtime = 'nodejs'` (非 edge) 是 streaming 的前提。
+20. **web 端 fetch 容器内 daemon 7456 不可行** —— daemon listen `127.0.0.1` 容器内 loopback，浏览器 fetch 不到。**唯一**做法：Next.js 写 same-origin proxy route（`/api/daemon/[...path]` catch-all），forward 时附 `X-Addon-Internal-Token`，body/headers 透传。
 
 ## HA 端点行为（实测 HA 2026.6.0）
 

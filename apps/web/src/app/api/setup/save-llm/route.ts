@@ -1,0 +1,47 @@
+/**
+ * /api/setup/save-llm — server-side proxy for POST /api/llm/config
+ * (setup wizard). Same rationale + CSRF as save-ha.
+ */
+import { type NextRequest } from 'next/server';
+
+const DAEMON_URL = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
+const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
+
+const ALLOWED_ORIGINS = new Set([
+  process.env.HA_INGRESS_ORIGIN ?? 'http://homeassistant.local:8123',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+]);
+
+function csrfCheck(req: NextRequest): { ok: true } | { ok: false; reason: string } {
+  const origin = req.headers.get('origin');
+  if (!origin) return { ok: false, reason: 'missing Origin' };
+  if (!ALLOWED_ORIGINS.has(origin)) return { ok: false, reason: `origin "${origin}" not allowed` };
+  return { ok: true };
+}
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+export async function POST(req: NextRequest): Promise<Response> {
+  const csrf = csrfCheck(req);
+  if (!csrf.ok) {
+    return new Response(
+      JSON.stringify({ ok: false, code: 'CSRF_REJECTED', message: csrf.reason }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  const body = await req.text();
+  const upstream = await fetch(`${DAEMON_URL}/api/llm/config`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Addon-Internal-Token': TOKEN,
+    },
+    body,
+  });
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}

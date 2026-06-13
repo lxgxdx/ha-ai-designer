@@ -1,19 +1,19 @@
 /**
  * LLM orchestrator — turn a user brief into a LovelaceConfig.
  *
- * v0.4a scope: non-streaming, single-shot. The LLM gets:
+ * v0.4a: non-streaming, single-shot. The LLM gets:
  *   1. system prompt: SKILL.md body + DESIGN.md (if any) + wiki summaries
  *   2. user message: the brief + the live entity list (from HA /api/states)
  *   3. one tool: submit_dashboard(config: LovelaceConfig) — the LLM calls
  *      this when it has a final answer
  *
- * v0.5 will add streaming, comment-mode refinement, and tweak sliders.
+ * v0.2.0: streaming variant (`orchestrateStream`) for low-latency UI.
  */
 
 import { join, resolve } from 'node:path';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import yaml from 'js-yaml';
-import { chat, ChatMessage } from './llm-client.js';
+import { chat, chatStream, ChatMessage } from './llm-client.js';
 import { haRequest } from './ha-client.js';
 import { logger } from './logger.js';
 import type { LovelaceConfig } from '@ha-designer/contracts';
@@ -39,7 +39,10 @@ export interface OrchestrateResult {
     skillName: string;
     entitiesIncluded: number;
     model: string;
-    usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+    // usage is optional AND its inner fields are optional, to match
+    // OpenAI-compatible providers that emit usage only on the final
+    // chunk (or not at all on streaming responses). See ChatResponse.
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
   /** Warnings produced during validation (e.g. unknown entity_id). */
   warnings: string[];
@@ -249,9 +252,13 @@ export async function orchestrate(
   }
 
   // 6. Parse YAML → config
+  //    Use FAILSAFE_SCHEMA (string, seq, map, null only) so a malicious
+  //    LLM output that smuggles in `!!js/function: 'code'` tags can't
+  //    trigger arbitrary JS execution at deserialization time. A
+  //    LovelaceConfig only ever needs these primitive types.
   let config: LovelaceConfig;
   try {
-    config = yaml.load(yamlText) as LovelaceConfig;
+    config = yaml.load(yamlText, { schema: yaml.FAILSAFE_SCHEMA }) as LovelaceConfig;
   } catch (e) {
     throw new Error(
       `LLM YAML is not valid: ${(e as Error).message}\n---raw (first 800 chars)---\n${yamlText.slice(0, 800)}`,
@@ -410,4 +417,212 @@ function renderYamlString(s: string, indent: number): string {
     return '|\n' + s.split('\n').map((l) => pad + l).join('\n');
   }
   return s;
+}
+
+// =============================================================================
+// v0.2.0 streaming variant
+// =============================================================================
+
+/**
+ * Discriminated union of progress events emitted by `orchestrateStream`.
+ * The web SSE route forwards each as an `event: <type>` SSE frame.
+ */
+export type OrchestrateStreamEvent =
+  | { type: 'llm-chunk'; chunk: string }
+  | { type: 'yaml-extracted'; yaml: string }
+  // usage fields are all optional because OpenAI-compat providers may
+  // emit usage only on the final chunk (or not at all, for streaming
+  // middle chunks). Loose-typed so the LLM client's ChatResponse.usage
+  // (also all-optional) assigns cleanly.
+  | { type: 'validated'; warnings: string[]; model: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }
+  | { type: 'done'; result: OrchestrateResult }
+  | { type: 'error'; message: string };
+
+/**
+ * Streaming orchestrator — emits progress events instead of returning a
+ * single result. The full SSE response shape is:
+ *
+ *   event: llm-chunk
+ *   data: {"chunk":"<text>"}
+ *
+ *   event: yaml-extracted
+ *   data: {"yaml":"<raw yaml>"}
+ *
+ *   event: validated
+ *   data: {"warnings":[],"model":"MiniMax-M3","usage":{...}}
+ *
+ *   event: done
+ *   data: {"ok":true,"config":{...},"yaml":"<canonical>","meta":{...},"warnings":[]}
+ *
+ *   event: error
+ *   data: {"ok":false,"message":"..."}
+ *
+ * Behavior matches `orchestrate()` exactly — same skill, same entity list,
+ * same yaml extraction, same validation, same yaml re-render. We duplicate
+ * the prep code (rather than refactoring `orchestrate` to call us) so the
+ * non-streaming code path keeps a clean promise return for the existing
+ * callers (and the smoke test) and a streaming path for the new UI.
+ */
+export async function orchestrateStream(
+  req: OrchestrateRequest,
+  emit: (e: OrchestrateStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const skillName = req.skillName ?? 'home-overview-dashboard';
+  const includeEntities = req.includeEntities ?? true;
+
+  // 1. Load skill + design (same as orchestrate)
+  const skillText = loadSkillText(skillName);
+  if (!skillText) {
+    throw new Error(`Skill "${skillName}" not found under skills/ or .claude/skills/`);
+  }
+  const designResult = loadDesignText(req.designSystemName);
+  const designBlock = designResult ?? '';
+
+  // 2. Load live entities (if requested)
+  let entitiesBlock = '';
+  let entityList: { entity_id: string }[] = [];
+  if (includeEntities) {
+    const { data } = await haRequest<{ entity_id: string; state: string; attributes: Record<string, unknown> }[]>(
+      '/api/states',
+    );
+    entityList = data ?? [];
+    entitiesBlock = summarizeEntities(entityList as { entity_id: string; state: string; attributes: Record<string, unknown> }[]);
+  }
+
+  // 3. Compose messages
+  const messages: ChatMessage[] = [
+    { role: 'system', content: SYSTEM_PROMPT_PREFIX },
+  ];
+  if (designBlock) {
+    messages.push({ role: 'system', content: `## Active DESIGN.md\n\n${designBlock}` });
+  }
+  messages.push({ role: 'system', content: `## Active SKILL: ${skillName}\n\n${skillText}` });
+  if (entitiesBlock) {
+    messages.push({
+      role: 'system',
+      content: `## Live entities (from your HA instance)\n\n${entitiesBlock}\n\nYou MUST only use entity_ids from this list.`,
+    });
+  }
+  messages.push({ role: 'user', content: req.brief });
+
+  // 4. Call LLM (streaming). Forward the AbortSignal so a client
+  // disconnect tears down the underlying fetch (and thus frees the
+  // daemon socket + the LLM provider's per-token billing clock)
+  // mid-flight instead of running to completion.
+  const stream = await chatStream({
+    messages,
+    temperature: 0.2,
+    max_tokens: 16000,
+    stream: true,
+    signal,
+  });
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let totalContent = '';
+  let model: string | undefined;
+  let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Split on newlines; keep the trailing partial line in the buffer.
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        if (!payload) continue;
+        let parsed: {
+          model?: string;
+          usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+          choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
+        };
+        try {
+          parsed = JSON.parse(payload);
+        } catch {
+          // Skip malformed lines (some providers send keepalive ":" comments).
+          continue;
+        }
+        if (parsed.model) model = parsed.model;
+        if (parsed.usage) usage = parsed.usage;
+        const delta = parsed.choices?.[0]?.delta;
+        if (delta?.content) {
+          totalContent += delta.content;
+          emit({ type: 'llm-chunk', chunk: delta.content });
+        }
+      }
+      if (signal?.aborted) {
+        await reader.cancel();
+        throw new Error('orchestrate aborted by client');
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+
+  // 5. Extract YAML from the assembled content
+  const yamlText = extractYamlBlock(totalContent);
+  if (!yamlText) {
+    throw new Error(
+      'LLM reply did not contain a ```yaml``` block. First 500 chars:\n' + totalContent.slice(0, 500),
+    );
+  }
+  emit({ type: 'yaml-extracted', yaml: yamlText });
+
+  // 6. Parse YAML → config
+  //    Use FAILSAFE_SCHEMA (string, seq, map, null only) so a malicious
+  //    LLM output that smuggles in `!!js/function: 'code'` tags can't
+  //    trigger arbitrary JS execution at deserialization time. A
+  //    LovelaceConfig only ever needs these primitive types.
+  let config: LovelaceConfig;
+  try {
+    config = yaml.load(yamlText, { schema: yaml.FAILSAFE_SCHEMA }) as LovelaceConfig;
+  } catch (e) {
+    throw new Error(
+      `LLM YAML is not valid: ${(e as Error).message}\n---raw (first 800 chars)---\n${yamlText.slice(0, 800)}`,
+    );
+  }
+
+  // 7. Validate (entity existence)
+  const warnings = validateConfig(config, entityList);
+  emit({ type: 'validated', warnings, model: model ?? 'unknown', usage });
+
+  // 8. Render to YAML (re-serialize with js-yaml for canonical output)
+  const yamlOut = renderYaml(config);
+
+  logger.info(
+    {
+      skillName,
+      entities: entityList.length,
+      warnings: warnings.length,
+      model: model ?? 'unknown',
+      outputYamlBytes: yamlOut.length,
+    },
+    'orchestrate stream done',
+  );
+
+  emit({
+    type: 'done',
+    result: {
+      config,
+      yaml: yamlOut,
+      meta: {
+        skillName,
+        entitiesIncluded: entityList.length,
+        model: model ?? 'unknown',
+        // usage is optional in ChatResponse; only include it when the
+        // provider actually returned a usage block. Spreading in
+        // `usage ? { usage } : {}` keeps OrchestrateResult.meta.usage
+        // (which is `{ ... }` required) happy without `as any` casts.
+        ...(usage ? { usage } : {}),
+      },
+      warnings,
+    },
+  });
 }
