@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.11 — 2026-06-13
+
+### Fixed
+- v0.1.10 build succeeded but the runtime failed with
+  `Error relocating /usr/local/bin/node: _ZTVN10__cxxabiv1... symbol
+  not found`. This is a C++ ABI mismatch — hassio base 16.3.2 is
+  Alpine 3.24 with libstdc++ 13, but Node 24's binary expects
+  symbols from a newer libstdc++ (v14+). Add `apk add libstdc++`
+  in the runtime stage to pick up the newer one from Alpine's repo.
+- (Side note from v0.1.10 investigation: `hassio-addons/base:16.3.2`
+  is in fact Alpine-based, not Debian — so the original "musl vs
+  glibc" hypothesis was wrong; this is purely a libstdc++ version
+  gap.)
+
 ## 0.1.10 — 2026-06-13
 
 ### Fixed

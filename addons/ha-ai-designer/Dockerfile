@@ -93,9 +93,12 @@ FROM ${BUILD_FROM} AS runtime
 # a linux-x64-musl variant for v24 (Alpine is musl-based).
 #
 # Cleanest fix: copy the Node 24 binary tree from the builder stage
-# (which is `FROM node:24-alpine`) into the runtime. The /usr/local/bin
-# overlay wins on PATH even when /usr/bin/node is present, so we leave
-# the hassio-installed v20 in place as a no-op fallback.
+# (which is `FROM node:24-alpine`) into the runtime. We must first
+# bump the runtime's libstdc++ — hassio base 16.3.2 is Alpine 3.24
+# with libstdc++ 13 (older C++ ABI), and the Node 24 binary needs
+# symbols from a newer libstdc++ (it was built against v14+). Just
+# `apk add libstdc++` pulls the newest available, which is enough.
+RUN apk add --no-cache libstdc++
 COPY --from=builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=builder /usr/local/bin/npm  /usr/local/bin/npm
 COPY --from=builder /usr/local/bin/npx /usr/local/bin/npx
