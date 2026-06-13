@@ -118,6 +118,15 @@ RUN hash -r \
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
 COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 
+# v0.1.21: copy the LLM-facing context (skills/, design-systems/, craft/)
+# from the build context. The orchestrator reads these at runtime via
+# HA_REPO_ROOT=/opt/ha-ai-designer (set in run.sh). Without this the
+# /api/chat route 502s with "Skill ... not found" because orchestrator
+# looks in ${HA_REPO_ROOT}/skills/<name>/SKILL.md.
+COPY skills /opt/ha-ai-designer/skills
+COPY design-systems /opt/ha-ai-designer/design-systems
+COPY craft /opt/ha-ai-designer/craft
+
 # Copy the add-on entry point
 COPY addons/ha-ai-designer/run.sh /run.sh
 RUN chmod a+x /run.sh

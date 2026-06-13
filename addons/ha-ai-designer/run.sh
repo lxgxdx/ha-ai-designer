@@ -28,7 +28,11 @@ exec > >(tee -a /data/logs/run.log) 2>&1
 bashio::log.info "Reading add-on options..."
 LOG_LEVEL=$(bashio::config 'log_level' 'info')          || LOG_LEVEL='info'
 INGRESS_PORT=$(bashio::config 'ingress_port' '3000')    || INGRESS_PORT='3000'
-DATA_DIR=$(bashio::config 'data_dir' '/data')           || DATA_DIR='/data'
+# v0.1.21: trim trailing whitespace from user-supplied paths. Users have
+# shipped data_dir="/data " (trailing space) in past incidents, which
+# caused every subsequent ${DATA_DIR}/... path to be interpreted as a
+# literal filename with a space in the middle (e.g. "/data /config.json").
+DATA_DIR=$(bashio::config 'data_dir' '/data' | xargs)   || DATA_DIR='/data'
 LLM_PROVIDER=$(bashio::config 'llm_provider' '')        || LLM_PROVIDER=''
 LLM_BASE_URL=$(bashio::config 'llm_base_url' '')        || LLM_BASE_URL=''
 LLM_MODEL=$(bashio::config 'llm_model' '')              || LLM_MODEL=''
@@ -46,12 +50,40 @@ export HA_DATA_DIR="${DATA_DIR}"
 export HA_LOG_LEVEL="${LOG_LEVEL}"
 export HA_LOG_PRETTY=0
 export NODE_ENV=production
+# v0.1.21: tell the orchestrator where to find skills/, design-systems/,
+# and craft/ at runtime. The Dockerfile copies these into
+# /opt/ha-ai-designer/ alongside apps/.
+export HA_REPO_ROOT=/opt/ha-ai-designer
 
-# 2. LLM config: if user provided, write to data/config.json so the daemon
-#    can pick it up via loadLlmConfig().
+# 2. Pre-warm the HA token FIRST: if homeassistant_api: true and
+#    SUPERVISOR_TOKEN is set, write a ha-only config.json so the daemon
+#    can call HA via the supervisor proxy without a long-lived user token.
+#
+#    v0.1.21: this block runs BEFORE the LLM block (it used to run after).
+#    In v0.1.20 the two blocks were not mutually exclusive: the LLM block
+#    wrote {ha, llm} but then immediately the supervisor block re-wrote
+#    {ha}-only, dropping the llm block. Reordering means the LLM block
+#    (step 3) can now read the just-written ha block and merge it in.
+if [ -n "${SUPERVISOR_TOKEN}" ]; then
+  bashio::log.info "Persisting HA token (supervisor) to ${DATA_DIR}/config.json"
+  HA_BASE_URL="http://supervisor/core"
+  HA_TOKEN="${SUPERVISOR_TOKEN}"
+  cat > "${DATA_DIR}/config.json" <<EOF
+{
+  "ha": {
+    "baseUrl": "${HA_BASE_URL}",
+    "token": "${HA_TOKEN}"
+  }
+}
+EOF
+  chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
+fi
+
+# 3. LLM config: if user provided, merge into data/config.json so the
+#    daemon can pick it up via loadLlmConfig(). Reads the existing ha
+#    block (just written by step 2) and preserves it.
 if [ -n "${LLM_API_KEY}" ]; then
   bashio::log.info "Persisting LLM config to ${DATA_DIR}/config.json (apiKey masked in logs)"
-  # Preserve any existing HA token if previously set
   HA_TOKEN_PRESERVED=""
   if [ -f "${DATA_DIR}/config.json" ]; then
     HA_TOKEN_PRESERVED=$(bashio::jq "${DATA_DIR}/config.json" '.ha // {}' 2>/dev/null || echo "{}")
@@ -64,25 +96,6 @@ if [ -n "${LLM_API_KEY}" ]; then
     "baseUrl": "${LLM_BASE_URL}",
     "apiKey": "${LLM_API_KEY}",
     "model": "${LLM_MODEL}"
-  }
-}
-EOF
-  chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
-fi
-
-# 3. Pre-warm the HA token: if homeassistant_api: true and SUPERVISOR_TOKEN
-#    is set, the daemon can call HA directly using this token (no need for
-#    a long-lived user token). We write it to config.json if no HA config
-#    exists yet.
-if [ -z "${HA_TOKEN_PRESERVED}" ] && [ -n "${SUPERVISOR_TOKEN}" ]; then
-  bashio::log.info "First-boot: probing HA via supervisor token (${SUPERVISOR_TOKEN:0:8}...)"
-  HA_BASE_URL="http://supervisor/core"
-  HA_TOKEN="${SUPERVISOR_TOKEN}"
-  cat > "${DATA_DIR}/config.json" <<EOF
-{
-  "ha": {
-    "baseUrl": "${HA_BASE_URL}",
-    "token": "${HA_TOKEN}"
   }
 }
 EOF

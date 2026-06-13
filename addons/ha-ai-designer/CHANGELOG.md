@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.1.21 — 2026-06-13
+
+### Fixed
+- **Bug A (run.sh, `data_dir` not trimmed).** `bashio::config 'data_dir' '/data'`
+  no longer returns the user's literal value (including trailing spaces).
+  Added `| xargs` to strip leading/trailing whitespace. Previously a
+  user-supplied `data_dir="/data "` (note the trailing space) caused every
+  `${DATA_DIR}/...` path to be interpreted as a literal filename with a
+  space in the middle — e.g. `/data /config.json` (an actual file in
+  `/data  /config.json` under the rootfs `/`). Confirmed in production:
+  this left the add-on looking healthy (daemon listening, web up) but
+  `/data/config.json` and `/data/logs/*.log` were never created.
+- **Bug A (run.sh, LLM block overwritten).** v0.1.20 had two adjacent
+  `if` blocks: (1) "if LLM_API_KEY is set, write {ha, llm} to
+  config.json", and (2) "if HA_TOKEN_PRESERVED is empty and
+  SUPERVISOR_TOKEN is set, write {ha} to config.json". On first boot
+  both conditions were true and the second block overwrote the first,
+  dropping the `llm` slice — leaving the daemon with HA credentials but
+  no LLM config. v0.1.21 reorders the blocks: supervisor token block
+  first (writes `{ha}`), then LLM block (reads `{ha}` and merges in
+  `{llm}`). The LLM block's `if [ -f config.json ]` guard now sees the
+  just-written file so the merge works on first boot too.
+- **Bug B (ha-ws-client.ts, WebSocket URL path).** `wsUrl()` was
+  computing `${protocol}//${u.host}/api/websocket`, dropping `u.pathname`.
+  When the daemon ran in add-on mode with `baseUrl="http://supervisor/core"`,
+  this produced `ws://supervisor/api/websocket` — a path that does not
+  exist on supervisor (the supervisor reverse-proxies the HA Core
+  WebSocket under `/core`, not at the root). Result: every WS connect
+  attempt returned `401 Unexpected server response`. v0.1.21 includes
+  `u.pathname` so the URL is `ws://supervisor/core/api/websocket`.
+- **Bug C (Dockerfile, skills/design-systems/craft not copied).** The
+  orchestrator (`apps/daemon/src/llm-orchestrator.ts:loadSkillText`)
+  reads `${HA_REPO_ROOT}/skills/<name>/SKILL.md` and
+  `${HA_REPO_ROOT}/design-systems/<name>/DESIGN.md` at runtime. v0.1.20
+  only COPY'd the built `apps/daemon` and `apps/web` directories into
+  the image — the `skills/`, `design-systems/`, and `craft/` source
+  trees were never copied. Result: every `/api/chat` call returned
+  `502 Skill "..." not found under skills/ or .claude/skills/`. v0.1.21
+  adds three `COPY` lines into `/opt/ha-ai-designer/` and sets
+  `HA_REPO_ROOT=/opt/ha-ai-designer` in `run.sh` so the orchestrator
+  resolves the paths inside the image.
+
+### Verified
+- All 3 bugs reproduce on the v0.1.20 add-on container at
+  `192.168.88.183:8123` (see `docs/ops/A-task-runbook.md` for the
+  end-to-end smoke procedure that surfaced them).
+
 ## 0.1.20 — 2026-06-13
 
 ### Fixed

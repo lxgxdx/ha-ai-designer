@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目一句话
 
-本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通**：brief → LLM（MiniMax m3）→ LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。两条部署路径：本地 `pnpm tools-dev run web`、HA Add-on `addons/ha-ai-designer/`（已发布到 `ghcr.io/lxgxdx/ha-ai-designer`）。
+本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通**：brief → LLM（MiniMax m3）→ LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。两条部署路径：本地 `pnpm tools-dev run web`、HA Add-on `addons/ha-ai-designer/`（已发布到 `ghcr.io/lxgxdx/ha-ai-designer`，**v0.1.20 端到端可用**）。
 
 设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)：SKILL.md / DESIGN.md / 沙箱预览范式，**目标域是 HA 卡片 YAML 而非通用 HTML**。
+
+**agent 阅读顺序**：本文件 → `AGENTS.md`（开发规约、命名、security 模型、TypeScript 风格）。`README.md` 是用户视角快速开始，但项目状态描述**可能过期**（之前还写"骨架阶段"）——以本文件为准。
 
 ## 仓库拓扑
 
@@ -75,6 +77,12 @@ CI（`.github/workflows/build-addon.yml`）：
 6. **CI 的 `images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}` 解析后必须带 owner**，否则 push 到 `ghcr.io/<image>` 报 "Create organization package" denied。
 7. **多架构 matrix 并行 push 互相覆盖 manifest list**（GHCR 不会自动合并）。当前只 build amd64；多架构要 `docker buildx imagetools create` 合并。
 8. **s6-overlay 不把 run.sh stdout 转发到 HA supervisor log**。v0.1.4 起 run.sh 加 `exec > >(tee -a /data/logs/run.log) 2>&1`，从 host 上 `docker exec addon_* cat /data/logs/run.log` 才能看 root cause。
+9. **`config.yaml` 的 `ingress_port` 是**顶层字段**（默认 8099）——**不是** `schema:` 块下的字段。`schema` 是给 HA UI Options 页配置用的；supervisor 解析 add-on 行为**只看顶层**。错把 `ingress_port` 嵌在 `schema.ingress_port: port` + `default.ingress_port: 3000` 下会导致 supervisor 用默认 8099 连容器，但容器内 web listen 3000 → "Cannot connect to 172.30.33.x:8099"。修法：**顶层**加 `ingress_port: 3000`，schema 里的同名项可删。
+10. **HA add-on 端口模式（`ingress: false`）+ `auth: false` = CRITICAL 暴露**：daemon 7456 + web 3000 暴露到 host LAN 全网段，无认证。**永远优先 ingress 模式**（HA session 保护）。临时切端口模式（v0.1.18 应急）会留这个洞。
+11. **`bashio::config` 不 trim 用户输入** —— `data_dir="/data "` (带末尾空格) 会让 `${DATA_DIR}/...` 拼成字面文件名（中间带空格）。修法：所有 `bashio::config <path_key>` 后接 `| xargs`。
+12. **`run.sh` 里两个相邻 `if` 块如果不互斥会互相覆盖** —— v0.1.20 bug：先写 `{ha,llm}` 后写 `{ha}`，llm 块丢失。**规则**：写文件的多分支必须保证：(a) **顺序正确**（先写会被后写覆盖的内容），或 (b) **读旧合并**（用 `jq` / `bashio::jq` 读已有 + 追加新字段）。
+13. **`ha-ws-client.ts` 的 `wsUrl()` 必须用 `u.pathname` 拼路径**，不能只 `u.host` —— supervisor 反代 HA Core 在 `/core/` 下，丢 `/core` 直接 401。通用规则：从 `baseUrl` 派生 WebSocket URL 时**永远**保留原 path。
+14. **Dockerfile runtime 阶段要 COPY orchestrator 读的所有 host-side 资源** —— `skills/`、`design-systems/`、`craft/`、`config/*.example.json` 等。**build context 是仓库根**，可以直接 `COPY skills /opt/ha-ai-designer/skills`，不用 `--from=builder`。配合 `HA_REPO_ROOT` 环境变量让 orchestrator 找到。
 
 ## HA 端点行为（实测 HA 2026.6.0）
 
@@ -130,9 +138,9 @@ chat        /api/chat
 ## 仓库内规则文件
 
 - `AGENTS.md` — 开发规约（命名、lifecycle、TypeScript 风格、security 模型）。**改包结构 / 加新命令 / 提 PR 之前必看**。
-- `README.md` — 用户视角快速开始
+- `README.md` — 用户视角快速开始（**项目状态描述可能过期**）
 - `addons/ha-ai-designer/README.md` — Add-on 安装 / 使用 / build / 排错
-- `addons/ha-ai-designer/CHANGELOG.md` — 版本变更
+- `addons/ha-ai-designer/CHANGELOG.md` — 版本变更（v0.1.20 起包含完整修复链）
 - `E:\Claude\hha-knowledge\` — LLM 用的 HA 知识库（karpathy-llm-wiki 协议）
 
 ## 变更落点判断树

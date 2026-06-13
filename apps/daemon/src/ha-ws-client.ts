@@ -55,7 +55,13 @@ class HaWsClient extends EventEmitter {
     const cfg = loadHaConfig();
     const u = new URL(cfg.baseUrl);
     const protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${u.host}/api/websocket`;
+    // v0.1.21: include u.pathname so the supervisor-proxy path is preserved.
+    //   baseUrl "http://supervisor/core" → u.pathname === "/core"
+    //   old code dropped the path and connected to ws://supervisor/api/websocket
+    //   (a path that doesn't exist on supervisor → 401).
+    //   Now: ws://supervisor/core/api/websocket (correct, supervisor reverse-
+    //   proxies this to the HA Core /api/websocket endpoint).
+    return `${protocol}//${u.host}${u.pathname}/api/websocket`;
   }
 
   private async connect(): Promise<void> {
