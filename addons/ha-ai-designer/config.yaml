@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.1.14"
+version: "0.1.15"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -33,23 +33,6 @@ discovery:
   - ha_ai_designer
 services:
   - "mqtt:need"
-options:
-  schema:
-    log_level: "list|info|debug|trace|warn|error"
-    ingress_port: "port"
-    data_dir: "str"
-    llm_provider: "list|minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom"
-    llm_base_url: "str"
-    llm_model: "str"
-    llm_api_key: "password"
-  default:
-    log_level: "info"
-    ingress_port: 3000
-    data_dir: "/data"
-    llm_provider: "minimax"
-    llm_base_url: "https://api.minimaxi.com/v1"
-    llm_model: "MiniMax-Text-01"
-    llm_api_key: ""
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
   ingress_port: "port"

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.15 — 2026-06-13
+
+### Fixed
+- v0.1.14 ran daemon + web fine inside the container, but the
+  supervisor kept logging `Option 'schema' does not exist in the
+  schema for HA AI Designer` and `Option 'default' does not exist`,
+  and `Ingress for c1669d6a_ha_ai_designer not available`. Root
+  cause: `config.yaml` had `schema:` and `default:` wrapped inside
+  an `options:` block (plus a duplicate top-level `schema:`).
+  HA supervisor expects `schema:` and `default:` at the **top
+  level** of config.yaml — the `options:` wrapper is a different
+  thing entirely.
+- Removed the `options:` wrapper, removed the duplicate top-level
+  `schema:`, kept the top-level `schema:` only. The user's
+  actual schema definition (the second one) was already correct
+  in content; the indentation was just wrong.
+- This should also clear the `Ingress ... not available` warning
+  that was preventing the HA sidebar ingress entry from opening
+  with "应用似乎尚未准备就绪".
+
 ## 0.1.14 — 2026-06-13
 
 ### Fixed
