@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.17 — 2026-06-13
+
+### Changed
+- Reverted the v0.1.16 port-mode workaround. Back to ingress mode
+  with the schema/default fix from v0.1.15 — but this time
+  `ingress_port: 3000` is provided in the schema so the supervisor
+  picks the right port (3000) instead of caching a stale 8099.
+
+### User action required after upgrade
+1. **Restart supervisor first** (not just the add-on) to clear
+   the cached 8099 ingress port from earlier versions:
+   ```
+   ha supervisor restart
+   ```
+2. Then `Settings → Add-ons → HA AI Designer → Update` (or
+   `Uninstall` then `Install` if the update button is still grey).
+3. After install, the "AI Designer" panel should appear in the
+   HA left sidebar.
+
 ## 0.1.16 — 2026-06-13
 
 ### Changed
