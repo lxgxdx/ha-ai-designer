@@ -1,5 +1,62 @@
 # Changelog
 
+## 0.1.22 — 2026-06-13
+
+### Security
+- **SSRF guard on `/api/llm/{config,test}`** (HIGH → mitigated). The
+  LLM BYOK surface accepted an arbitrary `baseUrl` for both write
+  (POST /api/llm/config) and the connectivity-test override
+  (POST /api/llm/test). A malicious or compromised UI / API caller
+  could turn the daemon into an SSRF proxy to:
+    - the cloud-metadata IP `169.254.169.254` (AWS / GCP / Azure IMDS),
+    - the supervisor proxy `http://supervisor/core/...` (LAN-reachable
+      from inside the add-on container, gated by the same SUPERVISOR_TOKEN
+      the daemon already holds, so daemon-mediated IMDS→HA
+      credential theft was possible),
+    - the host's own 127.0.0.1 / link-local / RFC1918 ranges.
+  v0.1.22 adds `validatePublicBaseUrl()` which resolves the host
+  (via `dns.lookup`) and rejects if ANY resolved address is in:
+    - 127/8, ::1 (loopback)
+    - 10/8, 172.16/12, 192.168/16, fc00::/7 (RFC1918 + ULA)
+    - 169.254/16, fe80::/10 (link-local — includes 169.254.169.254 IMDS)
+    - 224/4 (multicast + reserved)
+    - 2001:db8::/32 (documentation)
+  Both write and test routes call this. Bypass with
+  `HA_LLM_ALLOW_PRIVATE_HOSTS=1` (for local ollama / dev only — never
+  set in add-on mode). Failure mode: 400 with `code: PRIVATE_HOST_BLOCKED`
+  and a clear `reason` field. The bypass is logged at warn level so
+  misuse is visible.
+- **Internal auth on web↔daemon HTTP** (HIGH → mitigated). Previously
+  any process on the same Docker network (or anyone reaching
+  127.0.0.1:7456) could call any daemon endpoint — including the
+  write paths (`/api/ha/dashboards/preview`, `lovelace/config/save`).
+  HA ingress closes the browser→web gap, but the web→daemon hop
+  was completely unauthenticated. v0.1.22:
+    1. daemon mints a 256-bit random token on first start, writes to
+       `${HA_DATA_DIR}/.daemon-token` (mode 0600) and loads it into
+       process memory.
+    2. daemon middleware `internalAuthMiddleware(token)` runs BEFORE
+       all routes and requires:
+         (a) `req.hostname` ∈ {127.0.0.1, ::1, localhost} — non-loopback
+             callers are rejected regardless of token (defense vs. an
+             external attacker who discovers the container port),
+         (b) header `X-Addon-Internal-Token` matches the in-memory
+             token via constant-time compare. Token mismatch → 401.
+       Only `GET /api/health` is exempted (operator / healthcheck).
+    3. `run.sh` reads the same token file and exports it to the web
+       process as `HA_DAEMON_TOKEN`. The web passes it as
+       `X-Addon-Internal-Token` on every server-side fetch
+       (currently only `apps/web/src/app/page.tsx`'s health probe).
+
+### Verified
+- All v0.1.21 fixes still hold (smoke 8/9 with the known
+  smoke-script bug in the health parser).
+- New SSRF tests: `baseUrl=http://127.0.0.1:8123` → 400, `baseUrl=
+  http://169.254.169.254/...` → 400, `baseUrl=https://api.minimaxi.com/v1`
+  → 200.
+- New auth tests: missing/incorrect `X-Addon-Internal-Token` → 401,
+  correct token → 200.
+
 ## 0.1.21 — 2026-06-13
 
 ### Fixed

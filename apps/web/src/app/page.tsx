@@ -20,8 +20,16 @@ async function fetchDaemonHealth(): Promise<{
   error?: string;
 }> {
   const url = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
+  // v0.1.22: the daemon now requires X-Addon-Internal-Token on every
+  // non-health request. /api/health itself is open, but we still send
+  // the token when present so the same fetch helper can be reused for
+  // any other future endpoint without forgetting the header.
+  const headers: Record<string, string> = {};
+  if (process.env.HA_DAEMON_TOKEN) {
+    headers['X-Addon-Internal-Token'] = process.env.HA_DAEMON_TOKEN;
+  }
   try {
-    const res = await fetch(`${url}/api/health`, { cache: 'no-store' });
+    const res = await fetch(`${url}/api/health`, { cache: 'no-store', headers });
     if (!res.ok) {
       return { ok: false, error: `HTTP ${res.status}` };
     }

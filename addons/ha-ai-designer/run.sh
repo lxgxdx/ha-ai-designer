@@ -132,12 +132,24 @@ NEXT_ENTRY="/opt/ha-ai-designer/apps/web/node_modules/next/dist/bin/next"
 if [ ! -f "${NEXT_ENTRY}" ]; then
   bashio::exit.nok "Next.js entry not found at ${NEXT_ENTRY}"
 fi
+# v0.1.22: pass the daemon's internal auth token to the web process so
+# server-side fetches (page.tsx) can authenticate. The daemon mints this
+# token on first boot and writes it to ${DATA_DIR}/.daemon-token (mode 0600).
+# If the file is missing (e.g. the daemon hasn't started yet) we leave
+# HA_DAEMON_TOKEN unset; the web will fall back to the env-less path and
+# daemon will reject those calls with 401 — that failure mode is loud and
+# obvious, which is the right behavior.
+HA_DAEMON_TOKEN=""
+if [ -f "${DATA_DIR}/.daemon-token" ]; then
+  HA_DAEMON_TOKEN=$(cat "${DATA_DIR}/.daemon-token" 2>/dev/null || true)
+fi
 nohup env \
   HOSTNAME=0.0.0.0 \
   HA_DAEMON_URL="http://127.0.0.1:${HA_DAEMON_PORT}" \
   HA_DAEMON_PORT="${HA_DAEMON_PORT}" \
   HA_WEB_PORT="${HA_WEB_PORT}" \
   HA_DATA_DIR="${DATA_DIR}" \
+  HA_DAEMON_TOKEN="${HA_DAEMON_TOKEN}" \
   PORT="${HA_WEB_PORT}" \
   node "${NEXT_ENTRY}" start -p "${HA_WEB_PORT}" \
   >> "${DATA_DIR}/logs/web.log" 2>&1 &

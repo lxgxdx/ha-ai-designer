@@ -83,6 +83,8 @@ CI（`.github/workflows/build-addon.yml`）：
 12. **`run.sh` 里两个相邻 `if` 块如果不互斥会互相覆盖** —— v0.1.20 bug：先写 `{ha,llm}` 后写 `{ha}`，llm 块丢失。**规则**：写文件的多分支必须保证：(a) **顺序正确**（先写会被后写覆盖的内容），或 (b) **读旧合并**（用 `jq` / `bashio::jq` 读已有 + 追加新字段）。
 13. **`ha-ws-client.ts` 的 `wsUrl()` 必须用 `u.pathname` 拼路径**，不能只 `u.host` —— supervisor 反代 HA Core 在 `/core/` 下，丢 `/core` 直接 401。通用规则：从 `baseUrl` 派生 WebSocket URL 时**永远**保留原 path。
 14. **Dockerfile runtime 阶段要 COPY orchestrator 读的所有 host-side 资源** —— `skills/`、`design-systems/`、`craft/`、`config/*.example.json` 等。**build context 是仓库根**，可以直接 `COPY skills /opt/ha-ai-designer/skills`，不用 `--from=builder`。配合 `HA_REPO_ROOT` 环境变量让 orchestrator 找到。
+15. **接受 user-supplied URL 的 endpoint 必有 SSRF 校验** —— LLM BYOK / webhook / OAuth redirect / 任意"用户填 URL"路径都得 resolve hostname + reject 私网/loopback/link-local/cloud-metadata IP 段（`169.254.169.254` IMDS 是最常被忽略的）。`HA_LLM_ALLOW_PRIVATE_HOSTS=1` 之类的 dev-only bypass env 必带清晰 warn-level log。**只**用字符串 prefix check（"hostname 不以 10. 开头就 OK"）**不**够，必须做 DNS 解析。
+16. **内部服务间 HTTP 必带 token** —— 即使都在 loopback 也必带（防同 Docker network 邻居容器 / 误开 host_network）。daemon 起服务时生成 `crypto.randomBytes(32).toString('base64url')` 写到 `${DATA_DIR}/.daemon-token` (mode 0600)，middleware 用 constant-time compare 校验 `X-Addon-Internal-Token` header；run.sh 把 token 通过 env 传给上游 web 进程。**loopback host check 是 belt，token 是 suspenders**——两件都要。
 
 ## HA 端点行为（实测 HA 2026.6.0）
 

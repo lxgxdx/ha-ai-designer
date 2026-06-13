@@ -7,8 +7,9 @@ import { createHaRouter } from './routes/ha.js';
 import { createLlmRouter } from './routes/llm.js';
 import { createChatRouter } from './routes/chat.js';
 import { createPreviewRouter } from './routes/preview.js';
+import { loadOrCreateInternalToken, internalAuthMiddleware } from './internal-auth.js';
 
-function buildApp(): express.Express {
+function buildApp(internalToken: string): express.Express {
   const app = express();
 
   // CORS — only allow the configured web origin (loopback by default).
@@ -21,6 +22,12 @@ function buildApp(): express.Express {
 
   // JSON body — keep limit modest; artifacts are written via separate routes.
   app.use(express.json({ limit: '1mb' }));
+
+  // v0.1.22: internal auth — every non-health request must come from
+  // loopback AND carry X-Addon-Internal-Token. Mounted BEFORE all route
+  // handlers so the gate is uniform regardless of which router registers
+  // the endpoint. /api/health is intentionally exempted.
+  app.use(internalAuthMiddleware(internalToken));
 
   // Per-request log line. Keep it terse — pino-pretty handles the rest.
   app.use((req, _res, next) => {
@@ -50,7 +57,15 @@ function buildApp(): express.Express {
 }
 
 function main(): void {
-  const app = buildApp();
+  // Mint or load the shared secret that lets the web process talk to us.
+  // Logged with a short prefix only — never the full token.
+  const internalToken = loadOrCreateInternalToken();
+  logger.info(
+    { tokenPrefix: internalToken.slice(0, 6) + '…' },
+    'internal auth token loaded; web must present X-Addon-Internal-Token'
+  );
+
+  const app = buildApp(internalToken);
   const server = app.listen(config.port, config.host, () => {
     logger.info(
       { host: config.host, port: config.port, webOrigin: config.webOrigin },
