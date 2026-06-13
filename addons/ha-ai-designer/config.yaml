@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.1.19"
+version: "0.1.20"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -20,6 +20,7 @@ homeassistant_api: true
 host_network: false
 auth: false
 ingress: true
+ingress_port: 3000
 panel_icon: "mdi:robot"
 panel_title: "AI Designer"
 panel_admin: true
@@ -35,7 +36,6 @@ services:
   - "mqtt:need"
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
-  ingress_port: "port"
   data_dir: "str"
   llm_provider: "list(minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom)"
   llm_base_url: "url"

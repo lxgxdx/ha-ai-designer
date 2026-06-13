@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.20 — 2026-06-13
+
+### Fixed
+- v0.1.19 still had ingress broken because we put `ingress_port: "port"`
+  inside the `schema:` block (under `options:`), thinking that's
+  where the supervisor would look. Wrong: **the `schema` is for the
+  user-facing Options UI, not for the supervisor's add-on config
+  parser**. The supervisor reads `ingress_port` from the **top level**
+  of config.yaml, defaulting to `8099` if absent.
+- Confirmed against the official HA add-on docs and the
+  `esphome/home-assistant-addon` config.yaml (which sets
+  `ingress_port: 0` at the top level for host_network mode).
+- v0.1.20 moves `ingress_port: 3000` to the top level so the
+  supervisor knows our web listens on 3000 inside the container.
+  The redundant `schema.ingress_port: port` is removed (users
+  shouldn't be tweaking this — they can override `llm_*` etc.).
+- Run.sh is unchanged (it already starts the web on `-p 3000`).
+  The supervisor will now correctly connect to
+  `172.30.33.9:3000` (our actual listen port) instead of
+  `172.30.33.9:8099` (the default we kept failing to override).
+
 ## 0.1.19 — 2026-06-13
 
 ### Security
