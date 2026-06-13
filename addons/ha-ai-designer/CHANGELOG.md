@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9 — 2026-06-13
+
+### Fixed
+- v0.1.8 still shipped a runtime with `node --version` reporting
+  v20.15.1 — even though we overlaid Node 24 onto /usr/local/bin, the
+  apk-installed `/usr/bin/node` from hassio base 16 wins on PATH
+  (Alpine puts /usr/bin first by default). Now we explicitly
+  `rm -f /usr/bin/node /usr/bin/npm /usr/bin/npx` after the tarball
+  overlay so the new Node 24 is the only one on PATH.
+
 ## 0.1.8 — 2026-06-13
 
 ### Fixed

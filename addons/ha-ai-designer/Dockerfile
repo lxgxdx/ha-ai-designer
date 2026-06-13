@@ -92,12 +92,16 @@ FROM ${BUILD_FROM} AS runtime
 #
 # Alpine's `n` install is flaky on hassio's read-only rootfs, so we go
 # straight to the official Node 24 musl tarball and overlay it onto
-# /usr/local (which is writable in the runtime stage).
+# /usr/local (which is writable in the runtime stage). We also remove
+# the apk-installed /usr/bin/node so /usr/local/bin wins on PATH
+# (Alpine puts /usr/bin first by default, which otherwise shadows us).
 RUN apk add --no-cache --update libstdc++ \
     && curl -fsSL https://nodejs.org/dist/v24.0.0/node-v24.0.0-linux-x64-musl.tar.xz \
        | tar -xJ -C /usr/local --strip-components=1 \
        --exclude=include \
        --exclude=share \
+    && rm -f /usr/bin/node /usr/bin/npm /usr/bin/npx \
+    && hash -r \
     && node --version && npm --version
 
 # Copy built artifacts
