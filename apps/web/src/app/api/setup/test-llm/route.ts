@@ -11,6 +11,11 @@ const ALLOWED_ORIGINS = new Set([
   process.env.HA_INGRESS_ORIGIN ?? 'http://homeassistant.local:8123',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  // v0.3.5: ALLOWED_ORIGINS_EXTRA from add-on Configuration.
+  ...(process.env.ALLOWED_ORIGINS_EXTRA ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
 ]);
 
 function csrfCheck(req: NextRequest): { ok: true } | { ok: false; reason: string } {

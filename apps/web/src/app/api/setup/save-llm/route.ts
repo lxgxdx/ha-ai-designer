@@ -11,6 +11,14 @@ const ALLOWED_ORIGINS = new Set([
   process.env.HA_INGRESS_ORIGIN ?? 'http://homeassistant.local:8123',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  // v0.3.5: extra origins (e.g. external hostname or LAN IP the user
+  // added via the add-on Configuration page) are merged in from
+  // ALLOWED_ORIGINS_EXTRA, a comma-separated env var. See
+  // /api/setup/save-ha/route.ts for the full rationale.
+  ...(process.env.ALLOWED_ORIGINS_EXTRA ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
 ]);
 
 function csrfCheck(req: NextRequest): { ok: true } | { ok: false; reason: string } {

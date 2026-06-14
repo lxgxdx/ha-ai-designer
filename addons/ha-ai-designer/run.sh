@@ -47,6 +47,13 @@ LLM_API_KEY=$(bashio::config 'llm_api_key' '')          || LLM_API_KEY=''
 EMBEDDING_BASE_URL=$(bashio::config 'embedding_base_url' '' | xargs)  || EMBEDDING_BASE_URL=''
 EMBEDDING_MODEL=$(bashio::config 'embedding_model' '' | xargs)        || EMBEDDING_MODEL=''
 EMBEDDING_API_KEY=$(bashio::config 'embedding_api_key' '' | xargs)    || EMBEDDING_API_KEY=''
+# v0.3.5: extra allowed origins for the web UI's CSRF guard
+# (api/setup/* + api/daemon proxy). Comma-separated list. Used
+# when the user exposes the add-on's web port (config.yaml ports:
+# {3000: 3000}) and reaches the UI from a hostname or LAN IP that
+# isn't HA's ingress. Forwarded to the web process as
+# ALLOWED_ORIGINS_EXTRA.
+ALLOWED_ORIGINS_EXTRA=$(bashio::config 'allowed_origins_extra' '' | xargs) || ALLOWED_ORIGINS_EXTRA=''
 
 bashio::log.info "  data_dir=${DATA_DIR}  log_level=${LOG_LEVEL}  llm_provider=${LLM_PROVIDER}"
 
@@ -259,6 +266,10 @@ nohup env \
   # in env lets future code (e.g. og:url, redirect targets) compute the
   # same prefix dynamically.
   SUPERVISOR_SLUG="ha_ai_designer" \
+  # v0.3.5: forward user-configured extra allowed origins for the
+  # web UI's CSRF guard (api/setup/* + api/daemon proxy). Comma-
+  # separated. Empty by default — ingress + localhost always work.
+  ALLOWED_ORIGINS_EXTRA="${ALLOWED_ORIGINS_EXTRA}" \
   PORT="${HA_WEB_PORT}" \
   node "${NEXT_ENTRY}" start -p "${HA_WEB_PORT}" \
   >> "${DATA_DIR}/logs/web.log" 2>&1 &

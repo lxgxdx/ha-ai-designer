@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.3.4"
+version: "0.3.5"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -61,4 +61,11 @@ schema:
   embedding_base_url: "url?"
   embedding_model: "str"
   embedding_api_key: "password?"
+  # v0.3.5: extra allowed origins for the web UI's CSRF guard
+  # (api/setup/* + api/daemon proxy). Comma-separated list. Use this
+  # when you've exposed the add-on's web port (config.yaml ports:
+  # {3000: 3000}) and reach the UI from a hostname or LAN IP that
+  # isn't HA's ingress. Example: "http://192.168.88.183:3000,http://ha-designer.lan:3000".
+  # Ingress and localhost:3000 / 127.0.0.1:3000 are always allowed.
+  allowed_origins_extra: "str?"
 image: "ghcr.io/lxgxdx/ha-ai-designer"

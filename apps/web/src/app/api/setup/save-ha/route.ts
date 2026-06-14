@@ -23,6 +23,16 @@ const ALLOWED_ORIGINS = new Set([
   process.env.HA_INGRESS_ORIGIN ?? 'http://homeassistant.local:8123',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
+  // v0.3.5: when the user exposes the add-on's port (config.yaml:
+  // ports: {3000: 3000}) and accesses it from an external hostname
+  // (or LAN IP) the Origin header is that hostname — not ingress.
+  // HA_INGRESS_ORIGIN alone is not enough. ALLOWED_ORIGINS_EXTRA
+  // is a comma-separated list of extra origins the user opts in
+  // to via the add-on Configuration page. Defaults to empty.
+  ...(process.env.ALLOWED_ORIGINS_EXTRA ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0),
 ]);
 
 function csrfCheck(req: NextRequest): { ok: true } | { ok: false; reason: string } {

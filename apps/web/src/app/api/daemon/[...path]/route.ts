@@ -105,6 +105,13 @@ async function handle(
   // stops a malicious site hosted on a sibling port (or an HA dash-
   // board iframe) from making the user's browser issue a same-origin
   // POST through this proxy to drive a daemon write.
+  //
+  // v0.3.5: ALLOWED_ORIGINS_EXTRA (comma-separated) adds the user's
+  // external hostname or LAN IP. The browser sends the Origin header
+  // matching whatever hostname it used to reach the web UI, so the
+  // hardcoded localhost:3000/ingress origins don't cover the case
+  // where the user exposed the add-on's port (config.yaml ports:
+  // {3000: 3000}) and is browsing via http://192.168.x.x:3000.
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const allowed = [
       // The HA ingress origin (the browser's view of this app).
@@ -114,6 +121,13 @@ async function handle(
       // trust a non-HA origin first.
       'http://localhost:3000',
       'http://127.0.0.1:3000',
+      // v0.3.5: user-configured extra origins (set via add-on
+      // Configuration's allowed_origins_extra option). Each entry is
+      // already trimmed; empty entries are filtered out.
+      ...(process.env.ALLOWED_ORIGINS_EXTRA ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
     ];
     const origin = req.headers.get('origin') ?? '';
     if (origin && !allowed.includes(origin)) {
