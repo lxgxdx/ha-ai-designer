@@ -7,5 +7,11 @@ packages:
 # prebuild-install / node-gyp lifecycle. Redundant with .npmrc but
 # keeps the policy in the workspace file too, so `pnpm install` in a
 # subdirectory picks it up.
+#
+# v0.5.0: added electron — its postinstall downloads the
+# electron-builder binaries. Without this, pnpm 10 strips the
+# postinstall script and the build fails with "electron: command
+# not found".
 onlyBuiltDependencies:
   - "better-sqlite3"
+  - "electron"

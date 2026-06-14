@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目一句话
 
-本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通（v0.2.0）**：brief → LLM（MiniMax m3）→ LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。两条部署路径：本地 `pnpm tools-dev run web`、HA Add-on `addons/ha-ai-designer/`（已发布到 `ghcr.io/lxgxdx/ha-ai-designer:0.2.0`，**add-on 模式 v0.2.0 端到端 work**）。
+本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通（v0.4.0）**：brief → LLM → LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。RAG 知识库（hha-knowledge）已 bake 进 image / 桌面 exe。
 
-设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)：SKILL.md / DESIGN.md / 沙箱预览范式，**目标域是 HA 卡片 YAML 而非通用 HTML**。
+**v0.5.0 主推桌面 .exe**（`apps/desktop/`，Electron 包装 daemon + web，跟 open-design 同路线）。HA Add-on (`addons/ha-ai-designer/`) 保留代码但进入 maintenance mode（v0.4.0 是最后一个积极迭代的 add-on 版本）。详见 `addons/ha-ai-designer/DEPRECATED.md`。
+
+设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)：SKILL.md / DESIGN.md / 沙箱预览范式，**目标域是 HA 卡片 YAML 而非通用 HTML**。open-design 的桌面打包（Electron）也是我们 v0.5.0 的参考实现。
 
 **agent 阅读顺序**：本文件 → `AGENTS.md`（开发规约、命名、security 模型、TypeScript 风格）。`README.md` 是用户视角快速开始，但项目状态描述**可能过期**（之前还写"骨架阶段"）——以本文件为准。
 
@@ -15,17 +17,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```
 ha-ai-designer/
 ├── apps/daemon/      Express + ws + pino 守护进程（5 子系统：REST/WS/LLM/orchestrator/preview-session）
-├── apps/web/         Next.js 15.1.6 App Router（/, /chat 两页）
+├── apps/web/         Next.js 15.1.6 App Router（/, /chat, /setup 三页）
+├── apps/desktop/     ★ v0.5.0: Electron 壳（spawn daemon + web，open BrowserWindow）
 ├── packages/contracts/ 共享 TypeScript DTO（纯 TS — 不许 import Node/Express/Next）
-├── tools/dev/        pnpm tools-dev lifecycle CLI
+├── tools/dev/        pnpm tools-dev lifecycle CLI（v0.5.0 扩展 desktop 子命令）
 ├── skills/           HA 场景技能（SKILL.md + assets + references）
 ├── design-systems/   HA 主题（DESIGN.md，9-section schema）
 ├── craft/            通用 HA 美学工艺
-├── addons/ha-ai-designer/  ★ HA Add-on 打包（config/build/Dockerfile/run/CHANGELOG/README/translations/repository.yaml）
-├── repository.yaml   ★ HA 商店的根 manifest（缺它 HA 不识别仓库）
+├── addons/ha-ai-designer/  ★ MAINTENANCE MODE: HA Add-on 打包代码保留，v0.4.0 是最后迭代版本
+├── repository.yaml   ⚠️ DEPRECATED：add-on 商店 manifest，后期重新启用 add-on 时再 push
 ├── data/             运行时（gitignore）— config.json / backups/lovelace/ / logs/
-└── .github/workflows/build-addon.yml  ★ CI：push master/tag → build multi-arch → push ghcr.io
+├── .github/workflows/
+│   ├── build-addon.yml   ⚠️ DEPRECATED：仅在打 add-on tag 时触发
+│   └── build-desktop.yml ★ v0.5.0: tag → build Windows .exe + macOS .app
 ```
+
+**v0.5.0 路径变更总结**：
+- 桌面 .exe（`pnpm desktop:build` → Windows .exe）是新主推路径
+- HA add-on 代码保留，bug fix only
+- 详见 `addons/ha-ai-designer/DEPRECATED.md` 切换原因
 
 ## 进程分工
 
@@ -33,6 +43,7 @@ ha-ai-designer/
 |---|---|---|
 | `daemon` | 7456 | HA REST + WS 客户端、LLM（OpenAI 兼容）、orchestrator、preview-session、**所有写操作护栏** |
 | `web` | 3000 | Next.js；**只通过 server-side fetch 调 daemon**，不直接暴露 daemon 给浏览器 |
+| `desktop` (Electron) | — | v0.5.0: spawn daemon + web 子进程，开 BrowserWindow 加载 http://127.0.0.1:3000 |
 
 ## Lifecycle（**唯一入口 `pnpm tools-dev`**，根 `package.json` 没注册 `pnpm dev` 等别名）
 
@@ -40,15 +51,33 @@ ha-ai-designer/
 pnpm install                       # 装依赖
 pnpm typecheck                     # 仓库级类型检查
 pnpm build                         # 仓库级构建（daemon tsc + web next build）
-pnpm tools-dev run web             # 前台起 daemon + web（开发推荐）
+pnpm tools-dev run web             # 前台起 daemon + web（开发推荐，可单独配 Electron desktop:dev）
 pnpm tools-dev start               # 后台起，写 data/.runtime.json
 pnpm tools-dev stop / status / check
 pnpm tools-dev logs --daemon|--web
+# v0.5.0: 桌面 .exe
+pnpm desktop:dev                   # 起 Electron 加载 http://127.0.0.1:3000（需先 tools-dev run web）
+pnpm desktop:build                 # 出 Windows .exe (NSIS installer)
+pnpm desktop:package               # 出 macOS .app + .dmg
 ```
 
-生产跑（脱 tsx）：`cd apps/daemon && node dist/server.js`；web 走 `cd apps/web && node node_modules/.bin/next start -p 3000`（CI Dockerfile 不用 `output: 'standalone'`，因 Next.js 14/15 `/_error` prerender bug；改用 `pnpm deploy --prod --legacy` 拿生产 runtime + `next start`，详见下文"Docker build 关键教训"）。
+生产跑（脱 tsx）：`cd apps/daemon && node dist/server.js`；web 走 `cd apps/web && node node_modules/.bin/next start -p 3000`。v0.5.0 起用户**不应**直接跑这两个——用 `pnpm desktop:dev` 或 `.exe`。
 
-## HA Add-on / Docker 部署（CI 自动化）
+## 部署模式
+
+v0.5.0 之前的两条路径（本地 `pnpm tools-dev` + HA add-on）合并/收敛：
+
+| 路径 | 状态 | 命令 | 适用场景 |
+|---|---|---|---|
+| **桌面 .exe** | ✅ v0.5.0 主推 | `pnpm desktop:build` → `apps/desktop/dist/ha-ai-designer Setup x.y.z.exe` | Windows / macOS / Linux 桌面用户（HA 运维在工位 PC） |
+| 本地 dev 服务 | ✅ 仍是 dev 入口 | `pnpm tools-dev run web` | 开发者本地调试（不打包） |
+| HA Add-on | ⚠️ Maintenance mode | 见 `addons/ha-ai-designer/DEPRECATED.md` | 后期重新启用，代码保留 |
+
+## HA Add-on / Docker 部署（**⚠️ v0.5.0 起 maintenance mode**）
+
+> **状态**：代码保留在 `addons/ha-ai-designer/`，CI workflow 保留在 `.github/workflows/build-addon.yml`。**v0.4.0 是最后一个积极迭代的 add-on 版本**（含 hha-knowledge baked-in、9→2 schema 简化、HA ingress assetPrefix）。v0.5.0 起桌面 .exe 是主推路径。
+>
+> 切换原因 / 复兴计划 / 已知未解决问题：见 `addons/ha-ai-designer/DEPRECATED.md`。
 
 仓库根有 `repository.yaml` — **HA 商店靠这个文件识别仓库**，缺它 HA 报 "is not a valid app repository"。
 
@@ -61,7 +90,7 @@ pnpm tools-dev logs --daemon|--web
    [https://github.com/users/<owner>/packages/container/<image>/settings](https://github.com/users/lxgxdx/packages/container/ha-ai-designer/settings)
    → Danger Zone → Change package visibility → Public
 
-CI（`.github/workflows/build-addon.yml`）：
+CI（`.github/workflows/build-addon.yml`）— **只对 `addons/ha-ai-designer/**` 路径变更触发**：
 - push master → build **amd64 only**（matrix 多架构被临时砍，详见"Docker build 关键教训"）→ push `ghcr.io/lxgxdx/ha-ai-designer:{master,latest}`
 - push tag `vX.Y.Z` → push `:{X.Y.Z}`（HA 商店用这个 tag 对应 `config.yaml: version`）
 

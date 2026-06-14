@@ -1,0 +1,169 @@
+name: Build HA AI Designer Desktop
+
+# Builds the Windows .exe (and macOS .dmg / Linux .AppImage on
+# push to master) via electron-builder. Outputs are uploaded as
+# GitHub Actions artifacts AND attached to the GitHub Release
+# (when triggered by a tag).
+#
+# Triggers:
+#   - push to master: build Windows + macOS, upload artifacts
+#     (no Release). Lets you download the .exe from the Actions
+#     run page for manual smoke-testing before cutting a tag.
+#   - push tag vX.Y.Z: build Windows + macOS + Linux, create a
+#     GitHub Release, attach all three artifacts.
+#   - manual workflow_dispatch: for one-off builds (e.g. testing
+#     the workflow itself).
+#
+# Why `windows-latest` for the Windows build:
+#   - electron-builder needs to run on Windows to produce a proper
+#     .exe (cross-compiling from Linux creates an exe that fails
+#     to sign or has weird path issues on real Windows machines).
+#   - Ubuntu runners have all the toolchain but the artifact
+#     sometimes has missing DLLs. Win runner + Win .exe is the
+#     stable path.
+#
+# Why mac + linux are still built:
+#   - Stage 0.5 of the roadmap is multi-platform. The CI is set
+#     up to support all three today; we just publish Windows as
+#     the primary because that's what the user wants for v0.5.0.
+#   - macOS and Linux jobs are marked as `continue-on-error: true`
+#     so a single broken platform doesn't block the Windows
+#     artifact.
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # v0.5.0: need write to create releases on tag push.
+  packages: read
+
+jobs:
+  build-desktop:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.33.2
+
+      # v0.5.0: daemon has better-sqlite3 (native build) and
+      # electron has a postinstall that fetches ~100MB. On
+      # Windows + macOS runners, MSVC / Xcode CLT is preinstalled.
+      # On Ubuntu, build-essential is preinstalled too. So this
+      # single `pnpm install` works on all three.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build daemon
+        run: pnpm --filter @ha-designer/daemon build
+
+      - name: Build web
+        run: pnpm --filter @ha-designer/web build
+
+      - name: Build Electron main + preload
+        run: pnpm --filter @ha-designer/desktop build
+
+      # electron-builder reads apps/desktop/electron-builder.yml
+      # and produces the platform-specific artifact in
+      # apps/desktop/dist/.
+      - name: Package desktop app
+        run: pnpm --filter @ha-designer/desktop run package
+        env:
+          # electron-builder reads these for signing (none in v0.5.0).
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # v0.5.0-alpha: macOS code signing isn't set up. Don't fail
+        # the whole matrix over it.
+        continue-on-error: ${{ matrix.os != 'windows-latest' }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ha-ai-designer-${{ matrix.os }}
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.yml
+          if-no-files-found: warn
+          retention-days: 14
+
+  # v0.5.0: when a tag like v0.5.0 is pushed, gather the artifacts
+  # from the build matrix above and create a GitHub Release. The
+  # release body is auto-generated from commits since the last
+  # tag.
+  release:
+    name: Create GitHub Release
+    needs: build-desktop
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: HA AI Designer ${{ github.ref_name }}
+          body: |
+            ## HA AI Designer ${{ github.ref_name }}
+
+            Desktop distribution. **Windows .exe is the primary target**;
+            macOS .dmg and Linux .AppImage are best-effort.
+
+            ### Install
+
+            - **Windows**: download `ha-ai-designer-windows-latest`, run the NSIS installer. No admin required; installs to `%LOCALAPPDATA%\Programs\HA AI Designer\`.
+            - **macOS**: download `ha-ai-designer-macos-latest`, open the .dmg, drag to Applications. (Unsigned in v0.5.0-alpha — Gatekeeper will warn; right-click → Open to bypass.)
+            - **Linux**: download `ha-ai-designer-ubuntu-latest`, `chmod +x` the .AppImage, run it.
+
+            ### First run
+
+            1. Launch the app — a window opens, no browser needed.
+            2. The wizard detects no HA config and shows the setup form.
+            3. Fill in: HA baseUrl + long-lived access token → LLM provider + API key → Embedding (4 options, Skip RAG works).
+            4. Done → start chatting.
+
+            ### Known issues (v0.5.0-alpha)
+
+            - Windows SmartScreen will warn on first install (no code signing yet)
+            - No auto-update — re-download for new versions
+            - Data lives in `%APPDATA%\ha-ai-designer\` (Windows) / `~/Library/Application Support/ha-ai-designer/` (macOS) / `~/.config/ha-ai-designer/` (Linux)
+
+            Full changelog: see `addons/ha-ai-designer/CHANGELOG.md` (most recent add-on entry) or the commit log.
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.AppImage
+            artifacts/**/*.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          fail_on_unmatched_files: false

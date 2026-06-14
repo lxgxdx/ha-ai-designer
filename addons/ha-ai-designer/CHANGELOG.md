@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.4.0 — 2026-06-14
+## 0.4.0 — 2026-06-14  *(final actively-developed add-on version — see DEPRECATED.md)*
+
+> **v0.5.0 起**：HA add-on 路径进入 **maintenance mode**。代码保留，CI workflow 保留（仅在 `addons/**` 变更时触发），但**不再主动开发**。主推路径切到桌面 `.exe`（`apps/desktop/`，Electron 包装 daemon + web）。详细原因 / 复兴计划见 `addons/ha-ai-designer/DEPRECATED.md`。
+>
+> v0.4.0 是 add-on 路径的"feature complete"状态：9→2 schema 简化、HA ingress assetPrefix 修复、`/setup` 4 步 wizard（含 Embedding 4 选项）、feedback loop、LLM PATCH 语义。后续问题（HA core panel 缓存陈旧导致 ingress 404、bashio "null" 字面量等）需要修 HA 核心 / 升级 hassio base，超出本项目范围。
+
+### Changed
 
 ### Changed
 - **Configuration schema reduced from 9 fields to 2** (`log_level` and

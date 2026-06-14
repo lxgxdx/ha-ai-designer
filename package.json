@@ -1,6 +1,6 @@
 {
   "name": "ha-ai-designer",
-  "version": "0.1.0",
+  "version": "0.5.0-alpha.1",
   "private": true,
   "description": "Local-first AI designer for Home Assistant Lovelace dashboards",
   "license": "Apache-2.0",
@@ -12,7 +12,10 @@
     "tools-dev": "pnpm --filter @ha-designer/tools-dev run dev",
     "typecheck": "pnpm -r typecheck",
     "build": "pnpm -r build",
-    "guard": "pnpm -r --if-present guard"
+    "guard": "pnpm -r --if-present guard",
+    "desktop:dev": "pnpm --filter @ha-designer/desktop run dev",
+    "desktop:build": "pnpm --filter @ha-designer/desktop run build",
+    "desktop:package": "pnpm --filter @ha-designer/desktop run package"
   },
   "devDependencies": {
     "typescript": "5.6.3"

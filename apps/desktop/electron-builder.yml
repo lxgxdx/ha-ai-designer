@@ -1,0 +1,84 @@
+# Electron-builder config — v0.5.0.
+# https://www.electron.build/configuration
+appId: ai.open-design.ha-ai-designer
+productName: HA AI Designer
+copyright: Copyright © 2026 lxgxdx
+asar: true
+
+directories:
+  # Where to write the packaged artifacts.
+  output: dist
+  # Where to look for the build output (we tsc to ./dist/).
+  buildResources: build
+
+files:
+  # What's bundled into app.asar (the main app code).
+  - dist/**/*
+  - package.json
+  - '!**/*.map'
+
+# v0.5.0: extra files (daemon dist + web build + web node_modules)
+# are NOT bundled into asar — they live in resources/ alongside
+# the executable. Main process loads them by absolute path via
+# process.resourcesPath. This keeps asar small and lets us swap
+# the daemon/web builds independently.
+extraResources:
+  - from: ../daemon/dist
+    to: daemon
+    filter: ['**/*']
+  - from: ../web/.next
+    to: web/.next
+    filter: ['**/*']
+  - from: ../web/public
+    to: web/public
+  - from: ../web/package.json
+    to: web/package.json
+  - from: ../web/next.config.mjs
+    to: web/next.config.mjs
+  - from: ../web/node_modules
+    to: web/node_modules
+    filter: ['next/**/*', 'next/dist/**/*']
+
+win:
+  # NSIS installer with per-user install (no admin needed).
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Code signing placeholder — fill in for SmartScreen-free install.
+  # certificateFile: ${env.CSC_LINK}
+  # certificatePassword: ${env.CSC_KEY_PASSWORD}
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: HA AI Designer
+  # Show README on install finish (linking to docs site).
+  # customLinks: []
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Development
+  artifactName: ${productName}-${version}.${ext}
+
+# Compression: maximum for smaller download.
+compression: maximum
+
+# Skip publishing — we use the release workflow for that.
+publish: null

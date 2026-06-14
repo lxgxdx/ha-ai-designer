@@ -1,0 +1,13 @@
+# Build output
+dist/
+
+# electron-builder artifacts
+release/
+out/
+
+# Build resources (place icons, etc. here when ready)
+build/
+!build/.gitkeep
+
+# Logs from local dev runs
+*.log

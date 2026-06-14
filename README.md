@@ -2,23 +2,38 @@
 
 > 本地优先的 **Home Assistant Lovelace 仪表板 AI 设计工具**。用自然语言 / 手绘草图描述需求，工具读你本地 HA 的实体、生成卡片 YAML、实时预览、一键推回 HA。
 
-设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)（SKILL.md / DESIGN.md / 沙箱预览 / 流式生成），目标域换成 **HA 卡片 YAML**。
+设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)（SKILL.md / DESIGN.md / 沙箱预览 / 流式生成），目标域换成 **HA 卡片 YAML**。open-design 的桌面打包（Electron）也是 v0.5.0 起我们主推的部署方式。
 
 ---
 
-## 当前状态：v0.2.0 端到端可用
+## 当前状态：v0.4.0 端到端可用，v0.5.0 桌面 .exe 收口
 
-**v0.2.0 已完成**：brief → LLM（MiniMax m3，OpenAI 兼容）→ LovelaceConfig YAML → SSE 流式输出 → WebSocket 推 HA → 自动备份 → 一键回滚。add-on 模式 `ghcr.io/lxgxdx/ha-ai-designer:0.2.0` 在 HA 侧栏已可见并能跑通。
+**v0.4.0 已完成（HA add-on 路径）**：
+- brief → LLM（MiniMax m3 / OpenAI / Anthropic / Ollama 等 8 家 provider）→ LovelaceConfig YAML → SSE 流式 → WebSocket 推 HA → 自动备份 → 一键回滚
+- RAG：hha-knowledge 51+ HA 卡片 + HACS 卡片进 orchestrator prompt
+- `/setup` 4 步 wizard：HA → LLM → Embedding（4 选项）→ Done
+- feedback loop：👍/👎 → JSONL → `learn.ts` 改 wiki
+- 9→2 schema 精简 + 401 / CSRF / nohup env `#` 注释 bug 修复
 
-**add-on 端到端** 包含：v0.1.22 修的 SSRF + web↔daemon 内部 auth，v0.2.0 修的 SSE streaming + setup wizard + same-origin proxy + 6 个 v0.2.0 安全 review 修法（IPv4-mapped IPv6 / setup CSRF / query allowlist / abort heartbeat / proxy POST export / non-null assertions）。
-
-**next**：v0.3 RAG 接 hha-knowledge 51 张 HA 卡片；v0.4 实时预览 iframe + Tweaks 滑块。详见 `docs/ops/A-task-runbook.md`（end-to-end 验收步骤） + `AGENTS.md` + `CLAUDE.md` 14 lessons。
+**v0.5.0（当前开发中）**：桌面 `.exe` 主推。HA add-on 代码保留，进入 maintenance mode。详见 `addons/ha-ai-designer/DEPRECATED.md`。
 
 ---
 
 ## 快速开始
 
-### 1. 准备环境
+### 用户（桌面 .exe，推荐）
+
+> v0.5.0-alpha 发布后可用
+
+1. 打开 [Releases](https://github.com/lxgxdx/ha-ai-designer/releases) 下载 `ha-ai-designer-Setup-x.y.z.exe`
+2. 双击安装 → 双击桌面图标启动
+3. 浏览器自动打开 <http://localhost:3000>（或 Electron 内嵌窗口）
+4. /setup 走 4 步：填 HA URL + 长期令牌 → 选 LLM provider → 选 Embedding → Done
+5. 开始用 chat 生成 dashboard
+
+### 开发者（本地 dev 服务）
+
+#### 1. 准备环境
 
 - Node `>=20`（推荐 `24`）
 - pnpm `10.33.2`
@@ -29,30 +44,32 @@ npm install -g pnpm@10.33.2
 
 > Windows 上 `corepack enable` 会 EPERM，请用 `npm install -g pnpm@10.33.2`。
 
-### 2. 装依赖
+#### 2. 装依赖 + 跑
 
 ```bash
 cd ha-ai-designer
 pnpm install
-```
-
-### 3. 跑骨架
-
-```bash
 pnpm tools-dev run web
 ```
 
 然后浏览器打开 <http://localhost:3000>，daemon 健康检查在 <http://localhost:7456/api/health>。
 
-### 4. 用 Docker 跑（计划中）
+#### 3. 开发 Electron 桌面壳
 
 ```bash
-cd deploy
-cp .env.example .env
-docker compose up -d
+# 终端 1：起 daemon + web
+pnpm tools-dev run web
+
+# 终端 2：起 Electron 包装
+pnpm desktop:dev
 ```
 
-> Docker 镜像与 `docker-compose.yml` 在 v0.1.0 阶段会先出可跑版本，再做 HA Add-on。
+#### 4. 打 Windows .exe
+
+```bash
+pnpm desktop:build
+# 产物在 apps/desktop/dist/
+```
 
 ---
 
@@ -61,17 +78,18 @@ docker compose up -d
 ```
 ha-ai-designer/
 ├── apps/
-│   ├── web/        # Next.js 14 前端
-│   └── daemon/     # Express 本地守护进程
+│   ├── daemon/     # Express 本地守护进程（5 子系统：REST/WS/LLM/orchestrator/preview-session）
+│   ├── web/        # Next.js 15 前端
+│   └── desktop/    # ★ v0.5.0: Electron 壳（spawn daemon + web，open BrowserWindow）
 ├── packages/
 │   └── contracts/  # 共享 TypeScript 类型
 ├── tools/
 │   └── dev/        # pnpm tools-dev lifecycle 控制平面
-├── skills/         # HA 场景技能（SKILL.md）— 占位
-├── design-systems/ # HA 主题（DESIGN.md）— 占位
-├── craft/          # 通用 HA 美学工艺 — 占位
+├── skills/         # HA 场景技能（SKILL.md）
+├── design-systems/ # HA 主题（DESIGN.md）
+├── craft/          # 通用 HA 美学工艺
+├── addons/         # ⚠️ Maintenance mode: HA add-on 代码（v0.4.0 最后一版）
 ├── data/           # 运行时数据（gitignore）
-├── deploy/         # Docker / Add-on 配置
 └── docs/           # 架构、协议、schema 文档
 ```
 
@@ -80,10 +98,10 @@ ha-ai-designer/
 ## 路线图
 
 - [x] v0.1 骨架：workspace + lifecycle + 空 web/daemon
-- [x] v0.2 HA 接入 + LLM 接入 + push dashboard + 自动备份 + 回滚（v0.2.0 端到端可用）
-- [ ] v0.3 RAG：把 `E:\Claude\hha-knowledge\` 51 张 HA 卡片 + HACS 卡片接进 orchestrator prompt
-- [ ] v0.4 实时预览 iframe + Tweaks 滑块
-- [ ] v0.5 多 dashboard 覆盖（非 default storage / YAML 模式）
-- [ ] v0.6 错误恢复 + 离线容忍 + entity 缓存
-- [ ] v0.7 HACS / HA 商店上架 + i18n
+- [x] v0.2 HA 接入 + LLM 接入 + push dashboard + 自动备份 + 回滚
+- [x] v0.3 RAG：hha-knowledge 51+ HA 卡片 + HACS 卡片入 orchestrator
+- [x] v0.4 4 步 wizard + feedback loop + 9→2 schema + bug 修链
+- [ ] **v0.5 Electron 桌面 .exe**（当前）
+- [ ] v0.6 macOS .app / Linux .AppImage + 代码签名 + 自动更新
+- [ ] v0.7 i18n + HACS 商店上架（可选）
 - [ ] v1.0 GA

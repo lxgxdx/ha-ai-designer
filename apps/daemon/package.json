@@ -1,10 +1,13 @@
 {
   "name": "@ha-designer/daemon",
-  "version": "0.1.0",
+  "version": "0.5.0-alpha.1",
   "private": true,
   "description": "Local daemon — owns /api/*, HA adapter, LLM orchestration, artifact store.",
   "type": "module",
   "main": "./src/server.ts",
+  "bin": {
+    "ha-ai-designer": "./bin/ha-ai-designer.mjs"
+  },
   "scripts": {
     "dev": "tsx watch --clear-screen=false src/server.ts",
     "start": "node --import tsx src/server.ts",
