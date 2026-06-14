@@ -33,6 +33,15 @@ COPY tools/dev/package.json ./tools/dev/
 
 # Install all deps including devDependencies (needed for tsc + next build)
 ENV NODE_ENV=development
+# v0.3.0.2: better-sqlite3@11 has no prebuilt binary for
+# node-24 + linux-musl, so `prebuild-install` falls through to
+# `node-gyp rebuild --release`, which needs Python + make + g++.
+# Alpine ships none of these by default. We add them to the builder
+# stage only — the runtime stage is a hassio base that already has
+# what it needs and we don't want a 200MB Python in the final image.
+# See CLAUDE.md "Docker build 关键教训" for the rationale on why we
+# keep the runtime lean.
+RUN apk add --no-cache python3 make g++
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile || pnpm install
 
