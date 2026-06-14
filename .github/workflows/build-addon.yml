@@ -16,7 +16,7 @@ name: Build HA Add-on Image
 on:
   push:
     branches: [master]
-    tags: ['v*', 'addon-v*']
+    tags: ['addon-v*']   # only addon-v* tags, NOT desktop v* tags
     paths:
       - 'addons/**'
       - '.github/workflows/build-addon.yml'
