@@ -1,6 +1,6 @@
 # apps/desktop — Electron shell for HA AI Designer (v0.5.0+)
 
-This is the **recommended** way to run HA AI Designer as of v0.5.0. The Electron shell spawns the daemon + web as child processes and opens a BrowserWindow. The HA add-on path is now in maintenance mode (see `addons/ha-ai-designer/DEPRECATED.md`).
+This is the **recommended** way to run HA AI Designer as of v0.5.0. The Electron shell spawns the daemon + web as child processes and opens a BrowserWindow. This is the only supported distribution path — there is no separate Docker / HA add-on variant.
 
 ## Quick start
 
@@ -50,7 +50,7 @@ The installer creates:
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The web's `next.config.mjs` `assetPrefix` is **empty** in this build (we don't go through HA ingress anymore). The web's `app.getPath('userData')` becomes the new `${HA_DATA_DIR}` (no `/data` from the add-on world).
+The web's `next.config.mjs` `assetPrefix` is **empty** in this build (no reverse proxy in front). The Electron `app.getPath('userData')` becomes the `${HA_DATA_DIR}` (e.g. `%APPDATA%\ha-ai-designer\` on Windows).
 
 ## Why a separate app, not just `pnpm tools-dev run web`?
 

@@ -1,7 +1,7 @@
 /**
  * /api/daemon/[...path] — Next.js catch-all that forwards a narrow
  * set of GET requests to http://127.0.0.1:7456/<path>, attaching
- * the X-Addon-Internal-Token header. The response body is passed
+ * the X-Internal-Token header. The response body is passed
  * through verbatim (ReadableStream — no buffering) so SSE streams
  * from the daemon (e.g. /api/chat) flow through to the browser as-is.
  *
@@ -59,7 +59,7 @@ const ALLOWED_METHODS_FOR_PATH: Record<string, string[]> = {
 // Headers the browser is allowed to set on the proxied request.
 // Anything else (Cookie, Authorization, X-*, etc.) is dropped to
 // keep the trust boundary tight: the only credential the daemon
-// sees is the X-Addon-Internal-Token we set ourselves.
+// sees is the X-Internal-Token we set ourselves.
 const FORWARDED_REQUEST_HEADERS = ['accept', 'content-type', 'accept-encoding', 'accept-language'];
 
 export const dynamic = 'force-dynamic';
@@ -163,7 +163,7 @@ async function handle(
     const v = req.headers.get(name);
     if (v) headers.set(name, v);
   }
-  headers.set('X-Addon-Internal-Token', TOKEN);
+  headers.set('X-Internal-Token', TOKEN);
 
   let upstream: Response;
   try {

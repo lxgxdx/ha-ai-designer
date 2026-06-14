@@ -5,11 +5,10 @@
  * forwarded as an `event: <type>` SSE frame. The web client closes the
  * connection after receiving `event: done` (or `event: error`).
  *
- * SSE headers set here are tuned for HA ingress — the supervisor's
- * reverse proxy buffers responses by default, so we set
- * `X-Accel-Buffering: no` to keep chunks flowing. `Cache-Control:
- * no-cache, no-transform` blocks the proxy from caching or rewriting
- * the stream.
+ * SSE headers set here are tuned for nginx-like reverse proxies, which
+ * buffer responses by default. We set `X-Accel-Buffering: no` to keep
+ * chunks flowing. `Cache-Control: no-cache, no-transform` blocks the
+ * proxy from caching or rewriting the stream.
  *
  * The legacy non-streaming JSON response is preserved under
  * `?stream=0` for the smoke test and the curl-based verification

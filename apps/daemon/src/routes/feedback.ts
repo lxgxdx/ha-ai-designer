@@ -24,7 +24,7 @@
  *
  * Security:
  *   - Goes through the same internal auth middleware as every other
- *     route (X-Addon-Internal-Token).
+ *     route (X-Internal-Token header check).
  *   - When proxied via /api/daemon/[...path]/route.ts, Origin is CSRF-
  *     checked there.
  *   - File append is gated on HA_KNOWLEDGE_DIR being a real existing

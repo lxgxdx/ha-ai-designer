@@ -1,6 +1,0 @@
----
-# Home Assistant add-on repository manifest.
-# HA looks for this file at the repository root when you add a store URL.
-name: "HA AI Designer (unofficial)"
-url: "https://github.com/lxgxdx/ha-ai-designer"
-maintainer: "HA AI Designer contributors <noreply@example.com>"

@@ -44,7 +44,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Addon-Internal-Token': TOKEN,
+      'X-Internal-Token': TOKEN,
     },
     body,
   });

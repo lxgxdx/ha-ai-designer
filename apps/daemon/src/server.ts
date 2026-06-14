@@ -25,10 +25,10 @@ function buildApp(internalToken: string): express.Express {
   // JSON body — keep limit modest; artifacts are written via separate routes.
   app.use(express.json({ limit: '1mb' }));
 
-  // v0.1.22: internal auth — every non-health request must come from
-  // loopback AND carry X-Addon-Internal-Token. Mounted BEFORE all route
-  // handlers so the gate is uniform regardless of which router registers
-  // the endpoint. /api/health is intentionally exempted.
+  // Internal auth — every non-health request must come from loopback
+  // AND carry X-Internal-Token. Mounted BEFORE all route handlers
+  // so the gate is uniform regardless of which router registers the
+  // endpoint. /api/health is intentionally exempted.
   app.use(internalAuthMiddleware(internalToken));
 
   // Per-request log line. Keep it terse — pino-pretty handles the rest.
@@ -68,7 +68,7 @@ function main(): void {
   const internalToken = loadOrCreateInternalToken();
   logger.info(
     { tokenPrefix: internalToken.slice(0, 6) + '…' },
-    'internal auth token loaded; web must present X-Addon-Internal-Token'
+    'internal auth token loaded; web must present the matching X-Internal-Token header'
   );
 
   const app = buildApp(internalToken);

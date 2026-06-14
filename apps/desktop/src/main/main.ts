@@ -173,10 +173,6 @@ function startDaemon(): ChildProcess {
     HA_LOG_LEVEL: process.env.HA_LOG_LEVEL ?? 'info',
     HA_LOG_PRETTY: '0',
     NODE_ENV: 'production',
-    // v0.5.0: NOT add-on mode, so the daemon uses whatever HA
-    // connection the user configured via /setup (baseUrl + token
-    // stored in userData/config.json).
-    HA_ADDON_MODE: '0',
   };
 
   const proc = spawn(process.execPath, [bin], {

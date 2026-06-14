@@ -4,38 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目一句话
 
-本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通（v0.4.0）**：brief → LLM → LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。RAG 知识库（hha-knowledge）已 bake 进 image / 桌面 exe。
+本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**v0.5.0 桌面 .exe 主推**：brief → LLM → LovelaceConfig YAML → 推 HA → 自动备份 → 一键回滚，端到端已跑通。RAG 知识库（hha-knowledge）已 bake 进桌面安装包。
 
-**v0.5.0 主推桌面 .exe**（`apps/desktop/`，Electron 包装 daemon + web，跟 open-design 同路线）。HA Add-on (`addons/ha-ai-designer/`) 保留代码但进入 maintenance mode（v0.4.0 是最后一个积极迭代的 add-on 版本）。详见 `addons/ha-ai-designer/DEPRECATED.md`。
+**v0.5.0 起仅维护桌面 .exe 路径**（`apps/desktop/`，Electron 包装 daemon + web，跟 open-design 同路线）。不再维护 HA add-on / Docker 路径。
 
 设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)：SKILL.md / DESIGN.md / 沙箱预览范式，**目标域是 HA 卡片 YAML 而非通用 HTML**。open-design 的桌面打包（Electron）也是我们 v0.5.0 的参考实现。
 
-**agent 阅读顺序**：本文件 → `AGENTS.md`（开发规约、命名、security 模型、TypeScript 风格）。`README.md` 是用户视角快速开始，但项目状态描述**可能过期**（之前还写"骨架阶段"）——以本文件为准。
+**agent 阅读顺序**：本文件 → `AGENTS.md`（开发规约、命名、security 模型、TypeScript 风格）。`README.md` 是用户视角快速开始。
 
 ## 仓库拓扑
 
 ```
 ha-ai-designer/
 ├── apps/daemon/      Express + ws + pino 守护进程（5 子系统：REST/WS/LLM/orchestrator/preview-session）
-├── apps/web/         Next.js 15.1.6 App Router（/, /chat, /setup 三页）
+├── apps/web/         Next.js 15 App Router（/, /chat, /setup 三页）
 ├── apps/desktop/     ★ v0.5.0: Electron 壳（spawn daemon + web，open BrowserWindow）
 ├── packages/contracts/ 共享 TypeScript DTO（纯 TS — 不许 import Node/Express/Next）
-├── tools/dev/        pnpm tools-dev lifecycle CLI（v0.5.0 扩展 desktop 子命令）
+├── tools/dev/        pnpm tools-dev lifecycle CLI
 ├── skills/           HA 场景技能（SKILL.md + assets + references）
 ├── design-systems/   HA 主题（DESIGN.md，9-section schema）
 ├── craft/            通用 HA 美学工艺
-├── addons/ha-ai-designer/  ★ MAINTENANCE MODE: HA Add-on 打包代码保留，v0.4.0 是最后迭代版本
-├── repository.yaml   ⚠️ DEPRECATED：add-on 商店 manifest，后期重新启用 add-on 时再 push
 ├── data/             运行时（gitignore）— config.json / backups/lovelace/ / logs/
-├── .github/workflows/
-│   ├── build-addon.yml   ⚠️ DEPRECATED：仅在打 add-on tag 时触发
-│   └── build-desktop.yml ★ v0.5.0: tag → build Windows .exe + macOS .app
+└── .github/workflows/
+    └── build-desktop.yml ★ v0.5.0: tag → build Windows .exe + macOS .app
 ```
-
-**v0.5.0 路径变更总结**：
-- 桌面 .exe（`pnpm desktop:build` → Windows .exe）是新主推路径
-- HA add-on 代码保留，bug fix only
-- 详见 `addons/ha-ai-designer/DEPRECATED.md` 切换原因
 
 ## 进程分工
 
@@ -65,59 +57,31 @@ pnpm desktop:package               # 出 macOS .app + .dmg
 
 ## 部署模式
 
-v0.5.0 之前的两条路径（本地 `pnpm tools-dev` + HA add-on）合并/收敛：
+v0.5.0 起**只有一条主推路径**：
 
 | 路径 | 状态 | 命令 | 适用场景 |
 |---|---|---|---|
-| **桌面 .exe** | ✅ v0.5.0 主推 | `pnpm desktop:build` → `apps/desktop/dist/ha-ai-designer Setup x.y.z.exe` | Windows / macOS / Linux 桌面用户（HA 运维在工位 PC） |
-| 本地 dev 服务 | ✅ 仍是 dev 入口 | `pnpm tools-dev run web` | 开发者本地调试（不打包） |
-| HA Add-on | ⚠️ Maintenance mode | 见 `addons/ha-ai-designer/DEPRECATED.md` | 后期重新启用，代码保留 |
+| **桌面 .exe** | ✅ v0.5.0 唯一 | `pnpm desktop:build` → `apps/desktop/dist/HA AI Designer-Setup-x.y.z.exe` | Windows / macOS / Linux 桌面用户（HA 运维在工位 PC） |
+| 本地 dev 服务 | ✅ dev 入口 | `pnpm tools-dev run web` | 开发者本地调试（不打包） |
 
-## HA Add-on / Docker 部署（**⚠️ v0.5.0 起 maintenance mode**）
+## 关键事实 / 不变量
 
-> **状态**：代码保留在 `addons/ha-ai-designer/`，CI workflow 保留在 `.github/workflows/build-addon.yml`。**v0.4.0 是最后一个积极迭代的 add-on 版本**（含 hha-knowledge baked-in、9→2 schema 简化、HA ingress assetPrefix）。v0.5.0 起桌面 .exe 是主推路径。
->
-> 切换原因 / 复兴计划 / 已知未解决问题：见 `addons/ha-ai-designer/DEPRECATED.md`。
+- **HA 版本**：2026.6.0，REST 删了 dashboard 端点
+- **HA 实例**：`http://192.168.88.183:8123`，1499 实体
+- **HA token + LLM key** 都在桌面 userData 下的 `config.json`（gitignore，mode 0600），端点响应**只 mask 不回显**
+- **桌面 .exe 调试入口**：`%APPDATA%\ha-ai-designer\logs\`（Windows）/ `~/Library/Logs/ha-ai-designer/`（macOS）下的 `daemon.log` + `web.log`；或在开发模式 `pnpm desktop:dev` 直接看终端输出
+- **Windows 坑**（AGENTS.md 也有，这里只列和 build 相关的）：
+  - `pnpm scripts` 字段不展开 `${VAR:-default}` → `apps/web/scripts/{dev,start}.mjs` Node wrapper
+  - `spawn('pnpm')` ENOENT → `tools/dev/src/ports.ts` 的 `spawnPnpm`（`shell: true` + 显式 PATH）
+  - daemon cwd 是 `apps/daemon`，`./data` 错位 → tools-dev spawn 时设 `HA_DATA_DIR=仓库根/data`
+  - Next.js standalone 在 Windows build 报 EPERM symlink → **必须 Linux 容器 build**（GitHub Actions windows-latest runner 上跑产线也行，但本地开发 macOS / Linux runner 更快）
 
-仓库根有 `repository.yaml` — **HA 商店靠这个文件识别仓库**，缺它 HA 报 "is not a valid app repository"。
+## 仓库内规则文件
 
-**HA 商店"is not a valid app repository"的真实原因（**踩过的坑**）**：
-1. 缺根 `repository.yaml`
-2. `config.yaml` 的 `url` 字段值不是合法 URL（不能用 `http://[HOST]:[PORT:3000]` 模板）
-3. 仓库里**任何子目录**下的 `config.json` / `config.yaml` 都被 HA 扫到当 add-on config；误读会拒绝整个仓库。**`data/config.example.json` 这种 template 文件**必须放仓库外（`docs/`）或者改名成非 `config.*` 模式。
-4. `config.yaml` 的 `image` 字段**只支持 `{arch}` 占位符**（`str.format(arch=arch)`），不支持 `{slug}`。写死镜像名（如 `ghcr.io/<owner>/<image>`），不要模板化。
-5. **GHCR 包默认私有**，HA 安装需要匿名 pull，**但 GitHub 不允许通过 API 改 package 可见性**。**维护者必须手动**：
-   [https://github.com/users/<owner>/packages/container/<image>/settings](https://github.com/users/lxgxdx/packages/container/ha-ai-designer/settings)
-   → Danger Zone → Change package visibility → Public
-
-CI（`.github/workflows/build-addon.yml`）— **只对 `addons/ha-ai-designer/**` 路径变更触发**：
-- push master → build **amd64 only**（matrix 多架构被临时砍，详见"Docker build 关键教训"）→ push `ghcr.io/lxgxdx/ha-ai-designer:{master,latest}`
-- push tag `vX.Y.Z` → push `:{X.Y.Z}`（HA 商店用这个 tag 对应 `config.yaml: version`）
-
-**架构只 build amd64**（你的 HA 是 x86 VM 暂够用）。`config.yaml` arch list 还列 aarch64 占位，但 CI matrix 只跑 amd64（多架构矩阵并行 push 会互相覆盖 manifest list）。未来加 aarch64 用 `docker buildx imagetools create` 合并。
-
-## Docker build 关键教训（避免重蹈）
-
-1. **`output: 'standalone'` 触发 Next.js `_error` prerender bug**（14.2.x 和 15.1.x/15.5.x 都有）。当前用 `pnpm deploy --prod --legacy` 拿生产 runtime + `next start` 启动。
-2. **`pnpm install --frozen-lockfile || pnpm install`** — 锁文件不匹配时 fallback 自动重写。
-3. **`NODE_ENV=production` 必须在 `next build` 之前重置**。Dockerfile 上一步 pnpm install 用了 `NODE_ENV=development`，不重置会走 development 路径触发 `<Html>` prerender 错。
-4. **`pnpm deploy` 10.x 必须加 `--legacy`**（ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE）。
-5. **CI 需要 `permissions: packages: write`** — 默认 GITHUB_TOKEN 没 packages 写权限。
-6. **CI 的 `images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}` 解析后必须带 owner**，否则 push 到 `ghcr.io/<image>` 报 "Create organization package" denied。
-7. **多架构 matrix 并行 push 互相覆盖 manifest list**（GHCR 不会自动合并）。当前只 build amd64；多架构要 `docker buildx imagetools create` 合并。
-8. **s6-overlay 不把 run.sh stdout 转发到 HA supervisor log**。v0.1.4 起 run.sh 加 `exec > >(tee -a /data/logs/run.log) 2>&1`，从 host 上 `docker exec addon_* cat /data/logs/run.log` 才能看 root cause。
-9. **`config.yaml` 的 `ingress_port` 是**顶层字段**（默认 8099）——**不是** `schema:` 块下的字段。`schema` 是给 HA UI Options 页配置用的；supervisor 解析 add-on 行为**只看顶层**。错把 `ingress_port` 嵌在 `schema.ingress_port: port` + `default.ingress_port: 3000` 下会导致 supervisor 用默认 8099 连容器，但容器内 web listen 3000 → "Cannot connect to 172.30.33.x:8099"。修法：**顶层**加 `ingress_port: 3000`，schema 里的同名项可删。
-10. **HA add-on 端口模式（`ingress: false`）+ `auth: false` = CRITICAL 暴露**：daemon 7456 + web 3000 暴露到 host LAN 全网段，无认证。**永远优先 ingress 模式**（HA session 保护）。临时切端口模式（v0.1.18 应急）会留这个洞。
-11. **`bashio::config` 不 trim 用户输入** —— `data_dir="/data "` (带末尾空格) 会让 `${DATA_DIR}/...` 拼成字面文件名（中间带空格）。修法：所有 `bashio::config <path_key>` 后接 `| xargs`。
-12. **`run.sh` 里两个相邻 `if` 块如果不互斥会互相覆盖** —— v0.1.20 bug：先写 `{ha,llm}` 后写 `{ha}`，llm 块丢失。**规则**：写文件的多分支必须保证：(a) **顺序正确**（先写会被后写覆盖的内容），或 (b) **读旧合并**（用 `jq` / `bashio::jq` 读已有 + 追加新字段）。
-13. **`ha-ws-client.ts` 的 `wsUrl()` 必须用 `u.pathname` 拼路径**，不能只 `u.host` —— supervisor 反代 HA Core 在 `/core/` 下，丢 `/core` 直接 401。通用规则：从 `baseUrl` 派生 WebSocket URL 时**永远**保留原 path。
-14. **Dockerfile runtime 阶段要 COPY orchestrator 读的所有 host-side 资源** —— `skills/`、`design-systems/`、`craft/`、`config/*.example.json` 等。**build context 是仓库根**，可以直接 `COPY skills /opt/ha-ai-designer/skills`，不用 `--from=builder`。配合 `HA_REPO_ROOT` 环境变量让 orchestrator 找到。
-15. **接受 user-supplied URL 的 endpoint 必有 SSRF 校验** —— LLM BYOK / webhook / OAuth redirect / 任意"用户填 URL"路径都得 resolve hostname + reject 私网/loopback/link-local/cloud-metadata IP 段（`169.254.169.254` IMDS 是最常被忽略的）。`HA_LLM_ALLOW_PRIVATE_HOSTS=1` 之类的 dev-only bypass env 必带清晰 warn-level log。**只**用字符串 prefix check（"hostname 不以 10. 开头就 OK"）**不**够，必须做 DNS 解析。
-16. **内部服务间 HTTP 必带 token** —— 即使都在 loopback 也必带（防同 Docker network 邻居容器 / 误开 host_network）。daemon 起服务时生成 `crypto.randomBytes(32).toString('base64url')` 写到 `${DATA_DIR}/.daemon-token` (mode 0600)，middleware 用 constant-time compare 校验 `X-Addon-Internal-Token` header；run.sh 把 token 通过 env 传给上游 web 进程。**loopback host check 是 belt，token 是 suspenders**——两件都要。
-17. **从不可信源（LLM 输出 / 用户上传 / 第三方 API）反序列化 YAML 必须 `FAILSAFE_SCHEMA`** —— `js-yaml` 默认 schema 接受 `!!js/function: 'malicious code'` 这种 tag，**会执行任意 JS**。LovelaceConfig / data dump / config 文件**只**需要 string/number/bool/null/seq/map，**必**用 `yaml.load(text, { schema: yaml.FAILSAFE_SCHEMA })`。
-18. **SSE 响应必设 `X-Accel-Buffering: no`** —— HA supervisor 走 nginx-like 反代，**默认按 `proxy_buffer_size` 缓存响应**才推给客户端，**streaming 直接被废**（变全量等响应完才返回）。`add-on` 模式 ingress 也走类似反代。**两端都设**：daemon 返的 SSE 头 + Next.js proxy 透传的头。
-19. **Next.js API route 透传 SSE** —— 不要 `await res.json()` / `await res.text()`，直接 `new Response(upstream.body, { headers })` 把 ReadableStream 透传。`runtime = 'nodejs'` (非 edge) 是 streaming 的前提。
-20. **web 端 fetch 容器内 daemon 7456 不可行** —— daemon listen `127.0.0.1` 容器内 loopback，浏览器 fetch 不到。**唯一**做法：Next.js 写 same-origin proxy route（`/api/daemon/[...path]` catch-all），forward 时附 `X-Addon-Internal-Token`，body/headers 透传。
+- `AGENTS.md` — 开发规约（命名、lifecycle、TypeScript 风格、security 模型）。**改包结构 / 加新命令 / 提 PR 之前必看**。
+- `README.md` — 用户视角快速开始
+- `apps/desktop/README.md` — 桌面 .exe 安装 / 使用 / build / 排错
+- `E:\Claude\hha-knowledge\` — LLM 用的 HA 知识库（karpathy-llm-wiki 协议）
 
 ## HA 端点行为（实测 HA 2026.6.0）
 
@@ -157,27 +121,6 @@ chat        /api/chat
 
 **用 YAML content 输出，不用 tool_call** — 绕开 MiniMax 端点 940 token cap。`MiniMax m3` = `MiniMax-Text-01` model id，baseUrl `https://api.minimaxi.com/v1`。
 
-## 关键事实 / 不变量
-
-- **HA 版本**：2026.6.0，REST 删了 dashboard 端点
-- **HA 实例**：`http://192.168.88.183:8123`，1499 实体
-- **HA token + LLM key** 都在 `data/config.json`（gitignore，mode 0600），端点响应**只 mask 不回显**
-- **Add-on 模式下不配 HA token**：`addons/ha-ai-designer/config.yaml` 设 `homeassistant_api: true`，supervisor 注入 `SUPERVISOR_TOKEN` 给容器；`addons/ha-ai-designer/run.sh` 首次启动时把 SUPERVISOR_TOKEN 写到 `/data/config.json` 的 `ha.token`，daemon 走 `http://supervisor/core` 调 HA REST+WS。LLM 凭证则必须用户在 add-on Configuration 页填。
-- **Add-on 调试入口**：当 HA supervisor log 卡在 banner 不动时，从 HA SSH 终端跑 `docker exec addon_<id> cat /data/logs/{run,daemon,web}.log` 拿真实日志。
-- **Windows 坑**（AGENTS.md 也有，这里只列和 build 相关的）：
-  - `pnpm scripts` 字段不展开 `${VAR:-default}` → `apps/web/scripts/{dev,start}.mjs` Node wrapper
-  - `spawn('pnpm')` ENOENT → `tools/dev/src/ports.ts` 的 `spawnPnpm`（`shell: true` + 显式 PATH）
-  - daemon cwd 是 `apps/daemon`，`./data` 错位 → tools-dev spawn 时设 `HA_DATA_DIR=仓库根/data`
-  - Next.js standalone 在 Windows build 报 EPERM symlink → **必须 Linux 容器 build**（Dockerfile 多阶段）
-
-## 仓库内规则文件
-
-- `AGENTS.md` — 开发规约（命名、lifecycle、TypeScript 风格、security 模型）。**改包结构 / 加新命令 / 提 PR 之前必看**。
-- `README.md` — 用户视角快速开始（**项目状态描述可能过期**）
-- `addons/ha-ai-designer/README.md` — Add-on 安装 / 使用 / build / 排错
-- `addons/ha-ai-designer/CHANGELOG.md` — 版本变更（v0.1.20 起包含完整修复链）
-- `E:\Claude\hha-knowledge\` — LLM 用的 HA 知识库（karpathy-llm-wiki 协议）
-
 ## 变更落点判断树
 
 - 加 HA 端点 → `apps/daemon/src/routes/<feature>.ts`（`create<Feature>Router()` 风格）+ `packages/contracts/src/api/<feature>.ts`（DTO）
@@ -185,6 +128,6 @@ chat        /api/chat
 - 加 WebSocket 调用 → `apps/daemon/src/ha-ws-client.ts`（已有 `haWsRequest<T>` helper）
 - 加前端页面 → `apps/web/src/app/<route>/page.tsx`
 - 加新 SKILL/DESIGN/craft → 各自顶层目录的子文件夹
-- 加 add-on → `addons/<slug>/` 复制 `ha-ai-designer/` 改 slug + 更新根 `repository.yaml` 描述
-- 加 tools-dev 子命令 → `tools/dev/src/ports.ts` + `tools/dev/src/index.ts` 的 switch
+- 加桌面 .exe 行为 → `apps/desktop/src/main/main.ts`（spawn lifecycle + BrowserWindow config）
+- 加新 desktop 子命令 → `tools/dev/src/ports.ts` + `tools/dev/src/index.ts` 的 switch
 - 更新 HA 知识库 → `E:\Claude\hha-knowledge\`（karpathy-llm-wiki 协议）

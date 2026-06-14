@@ -1,26 +1,28 @@
 /**
  * Internal auth — web↔daemon token + loopback-only guard.
  *
- * v0.1.22: the daemon now requires every HTTP request to carry
- *   X-Addon-Internal-Token: <token>
- * in a header. The token is a 256-bit random secret generated on
- * first start and persisted to ${HA_DATA_DIR}/.daemon-token (mode 0600).
+ * Every non-health HTTP request to the daemon must carry
+ *   X-Internal-Token: <token>
+ * in a header. The token is a 256-bit random secret generated on first
+ * start and persisted to ${HA_DATA_DIR}/.daemon-token (mode 0600).
+ * (Header name is historical — the mechanism is generic for any
+ * daemon ↔ web inter-process auth, not add-on specific.)
  *
- * The same token is passed to the web process via HA_DAEMON_TOKEN env
- * (set in run.sh) so server-side fetches from Next.js can include it.
+ * The web process picks up the token via HA_DAEMON_TOKEN env (set by
+ * the launcher: Electron main process in desktop mode) so server-side
+ * fetches from Next.js can include it.
  *
  * Two layers of defense:
  *   1. Host check — refuse requests where the Host header is anything
  *      other than 127.0.0.1 / ::1 / localhost. Catches the case where
- *      someone discovers the daemon's container-internal port and tries
- *      to hit it from outside.
+ *      someone discovers the daemon's loopback port and tries to hit
+ *      it from outside.
  *   2. Token check — even within loopback, refuse requests that don't
- *      present the matching token. Catches the case where some other
- *      container on the same Docker network manages to reach 127.0.0.1
- *      (or the host network is mistakenly enabled).
+ *      present the matching token. Catches the case where another
+ *      local process (or a misconfigured proxy) reaches 127.0.0.1.
  *
- * Exceptions: GET /api/health is open (used by run.sh's healthcheck loop
- * and any future operator monitoring; it doesn't expose anything).
+ * Exceptions: GET /api/health is open (used by healthcheck scripts and
+ * operator monitoring; it doesn't expose anything).
  */
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { join, resolve } from 'node:path';
@@ -66,14 +68,15 @@ export function loadOrCreateInternalToken(): string {
 /**
  * Build the Express middleware that enforces:
  *   1. Loopback host only (with one explicit bypass for tests below).
- *   2. Matching X-Addon-Internal-Token (except /api/health).
+ *   2. Matching X-Internal-Token (except /api/health).
  *
  * The token is held in a closure — never logged, never put on req.
  */
 export function internalAuthMiddleware(token: string): RequestHandler {
   return function internalAuth(req: Request, res: Response, next: NextFunction): void {
-    // /api/health is a public status check (run.sh polls it; operators may
-    // want to scrape it). It returns no secrets so leaving it open is fine.
+    // /api/health is a public status check (the Electron main polls it
+    // during startup; operators may want to scrape it). It returns no
+    // secrets so leaving it open is fine.
     if (req.path === '/api/health') {
       next();
       return;
@@ -90,10 +93,10 @@ export function internalAuthMiddleware(token: string): RequestHandler {
     }
 
     // Layer 2: token check. Constant-time compare to avoid timing oracles.
-    const provided = req.header('x-addon-internal-token');
+    const provided = req.header('x-internal-token');
     if (!provided || !constantTimeEqual(provided, token)) {
       logger.warn({ path: req.path, ip: req.ip }, 'daemon reject: missing or invalid internal token');
-      res.status(401).json({ error: 'unauthorized: missing or invalid X-Addon-Internal-Token' });
+      res.status(401).json({ error: 'unauthorized: missing or invalid internal token' });
       return;
     }
 

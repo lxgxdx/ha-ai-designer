@@ -44,7 +44,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     );
   }
   const upstream = await fetch(`${DAEMON_URL}/api/ha/ping`, {
-    headers: { 'X-Addon-Internal-Token': TOKEN },
+    headers: { 'X-Internal-Token': TOKEN },
   });
   return new Response(upstream.body, {
     status: upstream.status,

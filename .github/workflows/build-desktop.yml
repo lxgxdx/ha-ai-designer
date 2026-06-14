@@ -172,7 +172,7 @@ jobs:
             - No auto-update — re-download for new versions
             - Data lives in `%APPDATA%\ha-ai-designer\` (Windows) / `~/Library/Application Support/ha-ai-designer/` (macOS) / `~/.config/ha-ai-designer/` (Linux)
 
-            Full changelog: see `addons/ha-ai-designer/CHANGELOG.md` (most recent add-on entry) or the commit log.
+            Full changelog: see the commit log (`git log --oneline`).
           files: |
             artifacts/**/*.exe
             artifacts/**/*.dmg

@@ -3,7 +3,7 @@
  * used by the setup wizard (/setup page). Lives OUTSIDE the
  * /api/daemon/[...path] catch-all proxy so the proxy's GET-only
  * method allowlist doesn't block the wizard's write. The web process
- * attaches the X-Addon-Internal-Token here; the browser never sees
+ * attaches the X-Internal-Token here; the browser never sees
  * it.
  *
  * v0.2.0.5: same-origin CSRF guard. The wizard is reachable from
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Addon-Internal-Token': TOKEN,
+      'X-Internal-Token': TOKEN,
     },
     body,
   });

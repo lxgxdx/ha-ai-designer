@@ -1,11 +1,12 @@
 'use client';
 
 /**
- * /setup — first-run wizard for v0.4.0.
+ * /setup — first-run wizard for v0.5.0 desktop.
  *
- * v0.4.0 redesign (4 steps):
- *   1. HA connection — auto-detect add-on mode (SUPERVISOR_TOKEN path)
- *      vs. non-add-on (manual baseUrl + token). One of these always works.
+ * 4 steps:
+ *   1. HA connection — auto-detect whether a config is already saved
+ *      (from a previous run); if yes, skip the form. Otherwise show
+ *      the manual baseUrl + long-lived access token form.
  *   2. LLM (chat) configuration — provider dropdown with sane baseUrl +
  *      model defaults; user fills apiKey; "Test" hits /api/llm/test.
  *   3. Embedding (RAG) configuration — 4 options:
@@ -15,14 +16,6 @@
  *        - Local self-hosted (presets: infinity + bge-m3, ollama + nomic-embed)
  *      "Test" hits /api/llm/test-embedding (returns dim + latency).
  *   4. Done — summary card + link to /chat.
- *
- * v0.2.0 → v0.4.0 difference: the v0.2.0 wizard was 3 steps
- * (HA / LLM / Done) with credentials hand-typed in the HA Add-on
- * Configuration page. v0.4.0 pulls everything into the in-app wizard
- * so the Add-on Configuration page only exposes operational knobs
- * (log_level, allowed_origins_extra). v0.4.0 also fixes the run.sh
- * nohup env `#`-comment bug that left HA_DAEMON_TOKEN unset in the
- * web process (root cause of the v0.3.5 401).
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -99,11 +92,10 @@ export default function SetupPage(): React.ReactElement {
   const [embedStatus, setEmbedStatus] = useState<Status>(idleStatus);
 
   /**
-   * On mount, auto-probe /api/ha/ping. In add-on mode the daemon
-   * already has the SUPERVISOR_TOKEN in /data/config.json (written
-   * by run.sh), so the ping succeeds without user input. In non-
-   * add-on mode the ping fails with HaConfigError and the wizard
-   * shows the manual form.
+   * On mount, auto-probe /api/ha/ping. If a HA config is already saved
+   * (from a previous wizard run), the ping succeeds and we skip the
+   * manual form. On first run (no saved config), the ping fails and the
+   * wizard shows the manual baseUrl + token form.
    */
   useEffect(() => {
     let cancelled = false;
@@ -114,7 +106,7 @@ export default function SetupPage(): React.ReactElement {
         if (cancelled) return;
         if (j.ok) {
           setHaAutoDetected(true);
-          setHaStatus({ state: 'ok', msg: `已通过 supervisor 自动连接 HA ${j.haVersion ?? ''} (WS: ${j.wsOk ? '✓' : '✗'})` });
+          setHaStatus({ state: 'ok', msg: `已连接 HA ${j.haVersion ?? ''} (WS: ${j.wsOk ? '✓' : '✗'})` });
         } else {
           setHaAutoDetected(false);
         }
@@ -282,10 +274,10 @@ export default function SetupPage(): React.ReactElement {
           {haAutoDetected === true ? (
             <>
               <p style={{ margin: 0, color: 'var(--success, #2a7)' }}>
-                ✓ 检测到 add-on 模式：通过 supervisor 令牌自动连接 HA。
+                ✓ 已加载之前保存的 HA 配置。
               </p>
               <p style={{ margin: '8px 0 0', color: 'var(--text-dim)', fontSize: 13 }}>
-                无需手动配置。如需切换到非 supervisor 的 HA 实例（如开发测试），点下方"手动配置"。
+                无需手动配置。如需切换到另一台 HA 实例，点下方"手动配置"。
               </p>
               <StatusLine status={haStatus} />
               <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
@@ -306,7 +298,7 @@ export default function SetupPage(): React.ReactElement {
           ) : haAutoDetected === false ? (
             <>
               <p style={{ margin: 0, color: 'var(--text-dim)' }}>
-                检测到非 add-on 模式（如本地 <code>pnpm tools-dev run web</code> 启动）。请填写 HA 的 baseUrl 和长期访问令牌。
+                第一次启动（或还没保存过 HA 配置）。请填写 HA 的 baseUrl 和长期访问令牌。
               </p>
               <ManualHaForm
                 baseUrl={haBaseUrl} setBaseUrl={setHaBaseUrl}

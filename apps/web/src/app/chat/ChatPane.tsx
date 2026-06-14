@@ -159,7 +159,7 @@ export function ChatPane(): React.ReactElement {
 
   // v0.2.0: every daemon call goes through the same-origin Next.js
   // catch-all proxy at /api/daemon/* (apps/web/src/app/api/daemon/[...path]/route.ts),
-  // which attaches the X-Addon-Internal-Token header. The browser
+  // which attaches the X-Internal-Token header. The browser
   // itself can never reach http://127.0.0.1:7456 (container-internal
   // loopback), so this is the only way /api/chat etc. actually work
   // from the user's browser — even in add-on mode.

@@ -19,7 +19,7 @@ const DAEMON = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
 const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
-  return { ...(extra ?? {}), ...(TOKEN ? { 'X-Addon-Internal-Token': TOKEN } : {}) };
+  return { ...(extra ?? {}), ...(TOKEN ? { 'X-Internal-Token': TOKEN } : {}) };
 }
 
 async function fetchDaemonHealth(): Promise<{
