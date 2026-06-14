@@ -17,27 +17,33 @@ files:
   - package.json
   - '!**/*.map'
 
-# v0.5.0: extra files (daemon dist + web build + web node_modules)
-# are NOT bundled into asar — they live in resources/ alongside
-# the executable. Main process loads them by absolute path via
-# process.resourcesPath. This keeps asar small and lets us swap
-# the daemon/web builds independently.
+# v0.5.0-alpha.5: extra files (daemon + web) are NOT bundled into
+# asar — they live in resources/ alongside the executable. Main
+# process loads them by absolute path via process.resourcesPath.
+#
+# Source is `build/{daemon,web}-bundle/` — a self-contained tree
+# produced by `pnpm deploy --prod --legacy` (see
+# `scripts/bundle-{daemon,web}.mjs`). The deploy step flattens
+# pnpm's symlinked node_modules into a real directory tree that
+# electron-builder can copy verbatim.
+#
+# Why this matters: pnpm's normal node_modules/ has symlinks like
+#   node_modules/foo -> .pnpm/foo@1.0.0/node_modules/foo
+# which break when copied to a different root (the rel path points
+# back to the dev tree). Copying the deploy output avoids that.
+#
+# Earlier (v0.5.0-alpha.1 → alpha.4) we hand-rolled this by copying
+# individual files (`daemon/dist/`, `web/.next/`, individual
+# `node_modules/next/...` slices) — but the daemon's prod deps
+# (better-sqlite3 native, express, ws, pino, ...) were never
+# copied, so `require('better-sqlite3')` failed at startup.
 extraResources:
-  - from: ../daemon/dist
+  - from: build/daemon-bundle
     to: daemon
     filter: ['**/*']
-  - from: ../web/.next
-    to: web/.next
+  - from: build/web-bundle
+    to: web
     filter: ['**/*']
-  - from: ../web/public
-    to: web/public
-  - from: ../web/package.json
-    to: web/package.json
-  - from: ../web/next.config.mjs
-    to: web/next.config.mjs
-  - from: ../web/node_modules
-    to: web/node_modules
-    filter: ['next/**/*', 'next/dist/**/*']
 
 win:
   # NSIS installer with per-user install (no admin needed).

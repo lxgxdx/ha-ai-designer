@@ -8,8 +8,10 @@
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "package": "electron-builder --win --x64 --publish never",
-    "package:mac": "electron-builder --mac --publish never"
+    "bundle:daemon": "node scripts/bundle-daemon.mjs",
+    "bundle:web": "node scripts/bundle-web.mjs",
+    "package": "node scripts/bundle-daemon.mjs && node scripts/bundle-web.mjs && electron-builder --win --x64 --publish never",
+    "package:mac": "node scripts/bundle-daemon.mjs && node scripts/bundle-web.mjs && electron-builder --mac --publish never"
   },
   "dependencies": {
     "@ha-designer/contracts": "workspace:*"

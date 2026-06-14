@@ -66,18 +66,29 @@ function daemonBinPath(): string {
   // In dev (pnpm desktop:dev, before packaging), we invoke the
   // prebuilt dist/server.js directly via node — same as the
   // `ha-ai-designer` bin, but skipping the bin shim for speed.
-  // In packaged app, the daemon is copied into resources/ by
-  // electron-builder (extraResources in electron-builder.yml).
+  // In packaged app, the daemon is at resources/daemon/dist/...
+  // (produced by `pnpm deploy --prod --legacy` and copied via
+  // electron-builder's extraResources — see electron-builder.yml
+  // and scripts/bundle-daemon.mjs for the full pipeline).
   if (app.isPackaged) {
-    return join(process.resourcesPath, 'daemon', 'server.js');
+    return join(process.resourcesPath, 'daemon', 'dist', 'server.js');
   }
   return join(repoRoot(), 'apps', 'daemon', 'dist', 'server.js');
 }
 
 function webNextBinPath(): string {
-  // Same as daemon: dev = repo apps/web, packaged = resources/web.
+  // Same pattern as daemon: dev = repo apps/web/node_modules/next,
+  // packaged = resources/web/node_modules/next (from pnpm deploy).
   if (app.isPackaged) {
-    return join(process.resourcesPath, 'web', 'next', 'dist', 'bin', 'next');
+    return join(
+      process.resourcesPath,
+      'web',
+      'node_modules',
+      'next',
+      'dist',
+      'bin',
+      'next',
+    );
   }
   return join(
     repoRoot(),
