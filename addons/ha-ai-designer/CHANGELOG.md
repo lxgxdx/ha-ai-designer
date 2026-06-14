@@ -1,5 +1,92 @@
 # Changelog
 
+## 0.4.0 — 2026-06-14
+
+### Changed
+- **Configuration schema reduced from 9 fields to 2** (`log_level` and
+  `allowed_origins_extra`). LLM (chat + embedding) settings are no
+  longer a per-add-on Configuration concern — they're set inside the
+  add-on via the `/setup` wizard and persisted to `/data/config.json`.
+  One source of truth (config.json), provider-specific presets with
+  sane defaults in a UI rather than a flat list of baseUrl / model /
+  apiKey text fields, and the user can rotate keys without restarting
+  the add-on.
+- **`/setup` wizard is now a 4-step in-app flow** (HA → LLM → Embedding
+  → Done). Previous 3-step wizard had LLM credentials hand-typed in
+  the HA Add-on Configuration page. v0.4.0 pulls everything into the
+  in-app wizard so the Add-on Configuration page only exposes
+  operational knobs.
+- **HA internal ingress is the supported access mode** for v0.4.0+.
+  The Next.js build now bakes `assetPrefix: /hassio/ingress/<slug>`
+  into HTML / RSC payload so the browser constructs
+  `<ha-host>:8123/hassio/ingress/ha_ai_designer/_next/static/...`
+  URLs (which HA core + supervisor proxy back to the add-on). Direct
+  port-mode access still works for the HTML shell but static assets
+  will 404 in the assetPrefix-baked build — keep ingress as the
+  primary path.
+
+### Fixed
+- **`/setup` 401 root cause** — `run.sh` had inline `#` shell
+  comments after `\<newline>` continuations inside the
+  `nohup env ...` block that starts the web UI. Bash joins the
+  backslash-continued lines into a single logical line, so the `#`
+  was parsed as a shell comment that ate the rest of the line —
+  `SUPERVISOR_SLUG`, `ALLOWED_ORIGINS_EXTRA`, `PORT`, and the
+  `node "${NEXT_ENTRY}" start` command itself all became part of
+  the comment and were dropped. v0.4.0 moves all comments OUT of
+  the env block to bare `#` lines above it. Confirmed via direct
+  test: before fix, only the 6 vars before the first `#` were
+  passed to the inner command; after fix, all 9 vars are passed.
+- **HA connection was sometimes missing on first boot** when the
+  user hadn't gone through the wizard yet. `run.sh` v0.4.0 still
+  writes the `{ha: ...}` section from `SUPERVISOR_TOKEN` directly
+  (so the add-on always has a working HA connection in supervisor
+  mode), but no longer touches the `llm` section — that's the
+  wizard's exclusive territory now.
+
+### Added
+- **`POST /api/llm/test-embedding`** daemon endpoint — probes the
+  embedding endpoint with a tiny `["probe"]` input and returns
+  `{ ok, dim, latencyMs, model }`. Used by the wizard step 3
+  "Test" button. Same SSRF guard + Origin CSRF protection as
+  `/api/llm/test`.
+- **`POST /api/llm/config` now supports PATCH semantics** — only
+  the fields provided in the body are written; existing fields
+  are preserved. This lets the wizard update embedding in step 3
+  without wiping the chat LLM settings saved in step 2. Body
+  semantics: `undefined` / absent = keep existing; `null` / `""` =
+  clear; string = set.
+- **`/api/setup/test-embedding`** web proxy for the new daemon
+  endpoint. The wizard reuses `/api/setup/save-llm` for both chat
+  (step 2) and embedding (step 3) writes — only the body changes.
+- **Embedding model presets in the wizard step 3** (10 entries):
+  OpenAI text-embedding-3-small/large/ada-002, BAAI/bge-m3 (infinity),
+  nomic-embed-text / mxbai-embed-large / snowflake-arctic-embed
+  (Ollama), voyage-3 (Voyage AI), embed-english-v3.0 (Cohere).
+  User can also type a custom model id.
+- **`/page.tsx` setup gate** now reports the embedding state
+  (`configured` / `skipped` / `unknown`) in addition to HA + LLM.
+  Embedding is NOT required for the gate — chat works in summary-
+  only mode without it.
+
+### Upgrade notes
+- v0.3.x → v0.4.0 is a config-breaking upgrade. After install, the
+  Add-on Configuration page will only show `log_level` and
+  `allowed_origins_extra`. **All previous LLM / embedding settings
+  in `/data/config.json` (under `llm.*`) are preserved** — the
+  wizard will pick them up as "current" state. To re-edit, open
+  `/setup` in the web UI; to clear, run through step 3 with "Skip
+  RAG" selected.
+- After upgrade, the add-on must be **restarted once** (supervisor
+  "Restart" button) for the new env to take effect — the
+  `nohup env` block fix in `run.sh` only kicks in on container
+  start, not on hot-reload.
+- The HA ingress URL on the sidebar should now work end-to-end
+  (HTML + JS + CSS all load). If you previously opened the add-on
+  via direct port (`http://<host>:3000`), it will continue to work
+  for the HTML page but static assets will 404. Switch to the HA
+  sidebar ingress link.
+
 ## 0.3.1 — 2026-06-14
 
 ### Changed

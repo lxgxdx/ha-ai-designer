@@ -25,6 +25,10 @@ exec > >(tee -a /data/logs/run.log) 2>&1
 # 1. Read user-supplied options (set as env vars by supervisor).
 #    Tolerate missing options by defaulting to empty — supervisor sometimes
 #    doesn't pass the key if the user cleared the field.
+#
+# v0.4.0: schema reduced to 2 fields. LLM (chat + embedding) settings
+# are set inside the add-on via the /setup wizard and persisted to
+# /data/config.json. run.sh only reads infra/operational knobs.
 bashio::log.info "Reading add-on options..."
 LOG_LEVEL=$(bashio::config 'log_level' 'info')          || LOG_LEVEL='info'
 INGRESS_PORT=$(bashio::config 'ingress_port' '3000')    || INGRESS_PORT='3000'
@@ -35,18 +39,6 @@ INGRESS_PORT=$(bashio::config 'ingress_port' '3000')    || INGRESS_PORT='3000'
 # to shoot themselves. v0.3.1 removes the field entirely — /data is
 # always the add-on's persistent volume, full stop.)
 DATA_DIR='/data'
-LLM_PROVIDER=$(bashio::config 'llm_provider' '')        || LLM_PROVIDER=''
-LLM_BASE_URL=$(bashio::config 'llm_base_url' '')        || LLM_BASE_URL=''
-LLM_MODEL=$(bashio::config 'llm_model' '')              || LLM_MODEL=''
-LLM_API_KEY=$(bashio::config 'llm_api_key' '')          || LLM_API_KEY=''
-# v0.3.1.1: independent RAG embedding endpoint. Optional — when unset,
-# the daemon falls back to llm_base_url (for providers that also serve
-# /v1/embeddings, e.g. OpenAI / some MiniMax setups). Set both
-# embedding_base_url + embedding_model to use a dedicated endpoint
-# (recommended: local infinity + BAAI/bge-m3, separate from chat LLM).
-EMBEDDING_BASE_URL=$(bashio::config 'embedding_base_url' '' | xargs)  || EMBEDDING_BASE_URL=''
-EMBEDDING_MODEL=$(bashio::config 'embedding_model' '' | xargs)        || EMBEDDING_MODEL=''
-EMBEDDING_API_KEY=$(bashio::config 'embedding_api_key' '' | xargs)    || EMBEDDING_API_KEY=''
 # v0.3.5: extra allowed origins for the web UI's CSRF guard
 # (api/setup/* + api/daemon proxy). Comma-separated list. Used
 # when the user exposes the add-on's web port (config.yaml ports:
@@ -55,7 +47,7 @@ EMBEDDING_API_KEY=$(bashio::config 'embedding_api_key' '' | xargs)    || EMBEDDI
 # ALLOWED_ORIGINS_EXTRA.
 ALLOWED_ORIGINS_EXTRA=$(bashio::config 'allowed_origins_extra' '' | xargs) || ALLOWED_ORIGINS_EXTRA=''
 
-bashio::log.info "  data_dir=${DATA_DIR}  log_level=${LOG_LEVEL}  llm_provider=${LLM_PROVIDER}"
+bashio::log.info "  data_dir=${DATA_DIR}  log_level=${LOG_LEVEL}  allowed_origins_extra=${ALLOWED_ORIGINS_EXTRA:-<none>}"
 
 mkdir -p "${DATA_DIR}"           || bashio::exit.nok "mkdir ${DATA_DIR} failed"
 mkdir -p "${DATA_DIR}/backups/lovelace" 2>/dev/null || true
@@ -94,121 +86,44 @@ ln -sf "${PERSIST_KNOWLEDGE_DIR}" /opt/hha-knowledge
 export HA_KNOWLEDGE_DIR=/opt/hha-knowledge
 bashio::log.info "  hha-knowledge: ${HA_KNOWLEDGE_DIR} (-> ${PERSIST_KNOWLEDGE_DIR})"
 
-# 2. Persist config.json — single block, merge ha/llm/embedding
-#    sections. v0.3.1.1 refactor: the v0.1.20 "two if blocks overwrite
-#    each other" bug pattern is gone. We read the existing config first,
-#    then layer the three optional sections in, then write once. Any
-#    section the user didn't set on this restart is PRESERVED from the
-#    previous run (this matters when the user clears a field — the old
-#    value stays until the user explicitly empties the value AND we
-#    re-render the file; for the typical "fill in once and stay" case
-#    this is exactly what we want).
+# 2. Persist config.json — v0.4.0 simplified: this script only owns
+#    the `ha` section (when running as an HA add-on, SUPERVISOR_TOKEN
+#    is the source of truth and gets stored here so the daemon can
+#    reach HA via http://supervisor/core). The `llm` section is owned
+#    by the /setup wizard and is written via POST /api/llm/config
+#    from the browser. We PRESERVE any existing llm section on every
+#    restart (so the wizard's edits survive a container update).
 #
-#    Sections:
-#      ha:         { baseUrl, token }   — from SUPERVISOR_TOKEN
-#      llm:        { provider, baseUrl, apiKey, model }
-#      llm.embed*: { embeddingModel, embeddingBaseUrl?, embeddingApiKey? }
-#
-#    RAG-only deployments can leave llm.{provider,baseUrl,apiKey,model}
-#    empty and only set embedding_* — loadLlmConfig() in the daemon will
-#    throw on /api/chat, but the RAG store (loadEmbeddingConfig) indexes
-#    just fine.
-if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_MODEL}" ]; then
-  bashio::log.info "Persisting config to ${DATA_DIR}/config.json (apiKey masked in logs)"
+#    Rationale for the split:
+#      - HA section: infra, set once by HA, never rotates in practice
+#      - LLM section: user secret, rotated via wizard, must not be
+#        clobbered by container restarts
+#    Splitting ownership makes both flows simpler and harder to break.
+if [ -n "${SUPERVISOR_TOKEN}" ]; then
+  bashio::log.info "Persisting HA section to ${DATA_DIR}/config.json (add-on mode)"
 
-  # Read the existing sections we want to preserve. Default to '{}' so
-  # jq-style fallbacks work even on first boot.
-  # v0.3.1.1: use jq directly (hassio base 16.3.2 ships jq 1.7.1) instead
-  # of bashio::jq, which doesn't pass --arg through correctly and
-  # rejects the multi-arg form we use below for the LLM section. The
-  # bashio::jq wrapper is convenient for one-arg filters but loses
-  # too much on anything more complex.
-  EXISTING_HA='{}'
-  EXISTING_LLM='{}'
+  # Read existing config to preserve the llm section. Default to '{}'.
+  EXISTING='{}'
   if [ -f "${DATA_DIR}/config.json" ]; then
-    EXISTING_HA=$(jq -r '.ha // {}' "${DATA_DIR}/config.json" 2>/dev/null || echo "{}")
-    EXISTING_LLM=$(jq -r '.llm // {}' "${DATA_DIR}/config.json" 2>/dev/null || echo "{}")
+    EXISTING=$(cat "${DATA_DIR}/config.json" 2>/dev/null || echo "{}")
   fi
 
-  # Build the ha section
-  HA_JSON='{}'
-  if [ -n "${SUPERVISOR_TOKEN}" ]; then
-    HA_JSON="{\"baseUrl\": \"http://supervisor/core\", \"token\": \"${SUPERVISOR_TOKEN}\"}"
-    bashio::log.info "  ha: supervisor token (baseUrl=http://supervisor/core)"
-  elif [ "${EXISTING_HA}" != "{}" ]; then
-    HA_JSON="${EXISTING_HA}"
-    bashio::log.info "  ha: preserving previous config"
-  fi
-
-  # Build the llm chat section. We layer: existing LLM first, then
-  # overwrite the 4 chat fields if the user supplied them this run.
-  LLM_JSON="${EXISTING_LLM}"
-  if [ -n "${LLM_API_KEY}" ]; then
-    LLM_JSON=$(echo "${LLM_JSON}" | jq \
-      --arg provider "${LLM_PROVIDER}" \
-      --arg baseUrl "${LLM_BASE_URL}" \
-      --arg apiKey  "${LLM_API_KEY}" \
-      --arg model   "${LLM_MODEL}" \
-      '. + {provider: $provider, baseUrl: $baseUrl, apiKey: $apiKey, model: $model}')
-    bashio::log.info "  llm: ${LLM_PROVIDER} ${LLM_MODEL} (apiKey masked)"
-  fi
-
-  # Build the embedding sub-section. Independent of LLM chat — user can
-  # set embedding_* without touching llm_* and vice versa. We use jq's
-  # object-spread trick (`+ {}`) to conditionally include keys so that
-  # empty user inputs are NOT written as empty strings (the daemon's
-  # `?? null` fallback would not trigger on "" and we'd get a confusing
-  # "baseUrl not configured" error).
-  #
-  # v0.3.1.2: bashio::config for an UNSET option returns the literal
-  # string "null" on this hassio base 16.3.2 (NOT empty string). The
-  # v0.3.1.1 guard (`if $baseUrl != ""`) was therefore insufficient
-  # and the literal `"null"` ended up in config.json — which then made
-  # the daemon build URLs like `null/embeddings` and fail embedding
-  # probe. Guard against both the empty case AND the literal-"null"
-  # case (defensive: "null" in the v0.3.1 base, "null" set in jq
-  # output also rejected to be safe).
-  if [ -n "${EMBEDDING_MODEL}" ] && [ "${EMBEDDING_MODEL}" != "null" ]; then
-    LLM_JSON=$(echo "${LLM_JSON}" | jq \
-      --arg model "${EMBEDDING_MODEL}" \
-      --arg baseUrl "${EMBEDDING_BASE_URL}" \
-      --arg apiKey "${EMBEDDING_API_KEY}" \
-      '. + (
-        {embeddingModel: $model}
-        + (if $baseUrl != "" and $baseUrl != "null" then {embeddingBaseUrl: $baseUrl} else {} end)
-        + (if $apiKey  != "" and $apiKey  != "null" then {embeddingApiKey:  $apiKey}  else {} end)
-      )')
-    bashio::log.info "  llm.embedding: ${EMBEDDING_MODEL} ${EMBEDDING_BASE_URL:+@ ${EMBEDDING_BASE_URL}}"
-  fi
-
-  # Write the final config.json. Empty llm block is fine (e.g. user set
-  # only embedding_*) — loadLlmConfig() will throw on /api/chat but the
-  # RAG store will load from loadEmbeddingConfig() instead.
-  if [ "${HA_JSON}" = "{}" ] && [ "${LLM_JSON}" = "{}" ]; then
-    bashio::log.warning "No ha or llm config to persist; skipping config.json write"
-  else
-    if [ "${HA_JSON}" = "{}" ]; then
+  # v0.4.0: use jq to merge {ha: <new>} on top of existing. jq is
+  # available in hassio base 16.3.2 (1.7.1) — same rationale as v0.3.1.1.
+  echo "${EXISTING}" | jq \
+    --arg baseUrl "http://supervisor/core" \
+    --arg token   "${SUPERVISOR_TOKEN}" \
+    '. + {ha: {baseUrl: $baseUrl, token: $token}}' \
+    > "${DATA_DIR}/config.json" 2>/dev/null || {
+      bashio::log.warning "jq merge failed; writing fresh config.json (LLM config may need re-save)"
       cat > "${DATA_DIR}/config.json" <<EOF
 {
-  "llm": ${LLM_JSON}
+  "ha": {"baseUrl": "http://supervisor/core", "token": "${SUPERVISOR_TOKEN}"}
 }
 EOF
-    elif [ "${LLM_JSON}" = "{}" ]; then
-      cat > "${DATA_DIR}/config.json" <<EOF
-{
-  "ha": ${HA_JSON}
-}
-EOF
-    else
-      cat > "${DATA_DIR}/config.json" <<EOF
-{
-  "ha": ${HA_JSON},
-  "llm": ${LLM_JSON}
-}
-EOF
-    fi
-    chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
-  fi
+    }
+  chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
+  bashio::log.info "  ha: supervisor token (baseUrl=http://supervisor/core)"
 fi
 
 # 3.5. Kill any previous run's daemon/web processes. s6 restarts run.sh on
@@ -252,6 +167,20 @@ HA_DAEMON_TOKEN=""
 if [ -f "${DATA_DIR}/.daemon-token" ]; then
   HA_DAEMON_TOKEN=$(cat "${DATA_DIR}/.daemon-token" 2>/dev/null || true)
 fi
+# v0.4.0: SUPERVISOR_SLUG lets the web process build URLs that match
+# what HA ingress proxies (e.g. /hassio/ingress/<slug>/chat). Having
+# the slug in env lets future code (og:url, redirect targets) compute
+# the same prefix dynamically.
+#
+# v0.3.5: ALLOWED_ORIGINS_EXTRA forwards user-configured extra allowed
+# origins for the web UI's CSRF guard. Comma-separated; empty by
+# default — ingress + localhost always work.
+#
+# v0.4.0: previously the inline `#` comments after `\<newline>`
+# continuations in this env block were being parsed as shell comments,
+# which ate SUPERVISOR_SLUG / ALLOWED_ORIGINS_EXTRA / PORT and the
+# `node` command itself (root cause of the v0.3.5 401). Comments now
+# live OUTSIDE the env block.
 nohup env \
   HOSTNAME=0.0.0.0 \
   HA_DAEMON_URL="http://127.0.0.1:${HA_DAEMON_PORT}" \
@@ -259,16 +188,7 @@ nohup env \
   HA_WEB_PORT="${HA_WEB_PORT}" \
   HA_DATA_DIR="${DATA_DIR}" \
   HA_DAEMON_TOKEN="${HA_DAEMON_TOKEN}" \
-  # v0.3.3: forward the add-on slug so the web process can build URLs
-  # that match what HA ingress proxies (e.g. /hassio/ingress/<slug>/chat).
-  # Without this, Next.js basePath hardcoded in next.config.mjs is the
-  # only path-resolution path — that's already set, but having the slug
-  # in env lets future code (e.g. og:url, redirect targets) compute the
-  # same prefix dynamically.
   SUPERVISOR_SLUG="ha_ai_designer" \
-  # v0.3.5: forward user-configured extra allowed origins for the
-  # web UI's CSRF guard (api/setup/* + api/daemon proxy). Comma-
-  # separated. Empty by default — ingress + localhost always work.
   ALLOWED_ORIGINS_EXTRA="${ALLOWED_ORIGINS_EXTRA}" \
   PORT="${HA_WEB_PORT}" \
   node "${NEXT_ENTRY}" start -p "${HA_WEB_PORT}" \

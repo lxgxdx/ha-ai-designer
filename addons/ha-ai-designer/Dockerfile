@@ -70,6 +70,21 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV CI=true
 ENV NODE_ENV=production
 ENV NEXT_SKIP_TYPESCRIPT=1
+# v0.4.0: HA ingress asset prefix. HA core ingress URL is
+# `<ha-host>:8123/hassio/ingress/<slug>/`, and the browser fetches
+# `/_next/static/...` under that prefix path. The Next.js server
+# inside the add-on sees the path WITHOUT the prefix (supervisor
+# strips it before forwarding), but the asset URLs in the generated
+# HTML must INCLUDE the prefix so the browser constructs the right
+# request. assetPrefix is baked into string literals at build time,
+# so we MUST set this env before `next build` runs (not at runtime).
+#
+# The default slug is `ha_ai_designer` (from addons/ha-ai-designer/
+# config.yaml). Override at build time with `--build-arg
+# HA_INGRESS_SLUG=<other-slug>` if forking the add-on with a
+# different slug.
+ARG HA_INGRESS_SLUG=ha_ai_designer
+ENV HA_INGRESS_ASSET_PREFIX=/hassio/ingress/${HA_INGRESS_SLUG}
 RUN /build/apps/web/node_modules/.bin/next build /build/apps/web
 
 # -------- 3. Deploy production runtime for web --------

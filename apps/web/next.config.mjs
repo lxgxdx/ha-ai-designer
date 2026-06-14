@@ -9,20 +9,37 @@ const nextConfig = {
   //  We use pnpm deploy --prod in the Dockerfile instead, which produces a
   //  self-contained runtime with all production deps inlined.
   // output: 'standalone',
-  // v0.3.3 set basePath: '/hassio/ingress/ha_ai_designer' + assetPrefix
-  // based on the assumption that HA ingress passes the full prefix path
-  // to the web container. After install, every route 404'd — empirically
-  // HA ingress appears to ALREADY strip the ingress prefix before
-  // forwarding, so the web container sees `/chat`, not
-  // `/hassio/ingress/ha_ai_designer/chat`. basePath is wrong here.
   //
-  // v0.2.0 worked WITHOUT basePath, which corroborates the strip
-  // behavior. Reverting. If sub-page 404 ever comes back, the next
-  // step is to read HA supervisor's strip config (in
-  // /usr/share/hassio/share/) or switch to output: 'standalone' + a
-  // custom server.
-  // basePath: '/hassio/ingress/ha_ai_designer',  // v0.3.3 — wrong, see above
-  // assetPrefix: '/hassio/ingress/ha_ai_designer/',  // v0.3.3 — wrong
+  // v0.4.0: HA ingress asset prefix. The HA core ingress reverse proxy
+  // strips the `/hassio/ingress/<slug>` prefix before forwarding to
+  // the add-on, so the Next.js server inside the container sees bare
+  // paths (`/chat`, `/_next/static/...`). The browser, however, hits
+  // the add-on under the full prefix path
+  // (`<ha-host>:8123/hassio/ingress/<slug>/_next/static/...`).
+  //
+  // Next.js bakes the assetPrefix into the HTML / RSC payload at
+  // BUILD time — it's literally concatenated into string literals in
+  // the JS bundles (e.g. `<script src="<prefix>/_next/static/...">`).
+  // This means the value MUST be set in the Dockerfile BEFORE
+  // `next build` runs. We pass it as an env var that the Dockerfile
+  // exports to the build context.
+  //
+  // The default below is empty (direct-port mode, no prefix). The
+  // add-on Dockerfile overrides this to `/hassio/ingress/ha_ai_designer`
+  // matching the slug in addons/ha-ai-designer/config.yaml.
+  //
+  // Trade-off: with the ingress assetPrefix baked in, direct-port
+  // access (e.g. http://192.168.88.183:3000) will 404 on static
+  // assets. Ingress is the supported access mode; direct-port access
+  // is for development and requires a separate build (unset the env
+  // before `next build`).
+  //
+  // Historical context (v0.3.3): we briefly tried basePath+assetPrefix
+  // and saw 404s everywhere. The basePath was wrong — supervisor
+  // already strips the prefix, so Next.js basePath is unnecessary
+  // AND breaks routing. assetPrefix alone is correct: it only affects
+  // asset URLs (HTML/JS/CSS chunks), not route matching.
+  assetPrefix: process.env.HA_INGRESS_ASSET_PREFIX || '',
   // Forward HA_DAEMON_* env to the server runtime (used by API proxy route).
   env: {
     HA_DAEMON_URL:

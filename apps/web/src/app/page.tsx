@@ -41,6 +41,16 @@ async function fetchDaemonHealth(): Promise<{
 interface SetupStatus {
   llmConfigured: boolean;
   haConfigured: boolean;
+  /**
+   * v0.4.0: embedding configuration state. Three values:
+   *   - 'configured': llm.embeddingModel is set
+   *   - 'skipped':    wizard step 3 chose "Skip RAG" (or embedding
+   *                   was never set in v0.3.x and wizard hasn't run)
+   *   - 'unknown':    could not read llm config (daemon down, etc.)
+   * Embedding is OPTIONAL — chat works in summary-only mode without
+   * it. The page does NOT redirect on missing embedding.
+   */
+  embeddingState: 'configured' | 'skipped' | 'unknown';
 }
 
 /**
@@ -51,16 +61,18 @@ interface SetupStatus {
 async function fetchSetupStatus(): Promise<SetupStatus> {
   let llmConfigured = false;
   let haConfigured = false;
+  let embeddingState: SetupStatus['embeddingState'] = 'unknown';
   try {
     const r = await fetch(`${DAEMON}/api/llm/config`, {
       cache: 'no-store',
       headers: authHeaders(),
     });
     if (r.ok) {
-      const j = (await r.json()) as { configured?: boolean };
+      const j = (await r.json()) as { configured?: boolean; llm?: { embeddingModel?: string } };
       llmConfigured = j.configured === true;
+      embeddingState = j.llm?.embeddingModel ? 'configured' : 'skipped';
     }
-  } catch { /* leave false */ }
+  } catch { /* leave unknown */ }
   try {
     const r = await fetch(`${DAEMON}/api/ha/ping`, {
       cache: 'no-store',
@@ -71,7 +83,7 @@ async function fetchSetupStatus(): Promise<SetupStatus> {
       haConfigured = j.ok === true;
     }
   } catch { /* leave false */ }
-  return { llmConfigured, haConfigured };
+  return { llmConfigured, haConfigured, embeddingState };
 }
 
 export default async function HomePage(): Promise<React.ReactElement> {

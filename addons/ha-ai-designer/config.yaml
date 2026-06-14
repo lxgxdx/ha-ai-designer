@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.3.5"
+version: "0.4.0"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -42,25 +42,21 @@ discovery:
   - ha_ai_designer
 services:
   - "mqtt:need"
+# v0.4.0: schema reduced from 9 fields to 2. LLM (chat + embedding)
+# settings are no longer a per-add-on Configuration concern — they're
+# set inside the add-on via the /setup wizard and persisted to
+# /data/config.json. Rationale:
+#   - One source of truth (config.json), not two (HA options + config.json)
+#   - Provider-specific presets with sane defaults are easier to expose
+#     in a UI than a flat list of baseUrl / model / apiKey text fields
+#   - Users can rotate keys without restarting the add-on (wizard POSTs
+#     to /api/llm/config which clears the cached config and writes
+#     config.json directly)
+# Only log_level (debug surface) and allowed_origins_extra (CSRF
+# allowlist for direct-port access from a LAN IP or external hostname)
+# stay as add-on options — both are infra/operational, not credentials.
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
-  llm_provider: "list(minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom)"
-  llm_base_url: "url"
-  llm_model: "str"
-  llm_api_key: "password"
-  # v0.3.1.1: RAG embedding endpoint (independent of the chat LLM).
-  # Set these to enable wiki retrieval. Common setups:
-  #   - Local infinity + BAAI/bge-m3:  embedding_base_url=http://<host>:7997
-  #                                    embedding_model=BAAI/bge-m3
-  #   - OpenAI:                         embedding_base_url=https://api.openai.com/v1
-  #                                    embedding_api_key=sk-...
-  #                                    embedding_model=text-embedding-3-small
-  #   - Reuse chat provider:            leave embedding_base_url blank
-  #                                    embedding_model=embo-01  (or whatever the
-  #                                    chat provider serves at /v1/embeddings)
-  embedding_base_url: "url?"
-  embedding_model: "str"
-  embedding_api_key: "password?"
   # v0.3.5: extra allowed origins for the web UI's CSRF guard
   # (api/setup/* + api/daemon proxy). Comma-separated list. Use this
   # when you've exposed the add-on's web port (config.yaml ports:

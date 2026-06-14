@@ -85,25 +85,63 @@ export function createLlmRouter(): Router {
 
   /**
    * POST /api/llm/config
-   * Replace the LLM slice of data/config.json. The body is the full LlmConfig.
-   * apiKey is never returned in the response.
+   * v0.4.0: PATCH semantics — only the fields provided in the body
+   * are written; existing fields are preserved. This lets the
+   * /setup wizard update embedding settings in step 3 without
+   * wiping the chat LLM settings saved in step 2.
+   *
+   * Body semantics (per field):
+   *   - key absent OR `undefined`: keep existing
+   *   - key = `null` OR `""`:     clear the field
+   *   - key = string:             set to that value
+   *
+   * Validation:
+   *   - When chat fields are touched (provider / baseUrl / apiKey /
+   *     model), all 4 must be present and baseUrl must pass SSRF
+   *     guard. apiKey can be empty (Ollama).
+   *   - When ONLY embedding fields are touched, chat fields are not
+   *     required (RAG-only deployment).
+   *   - At least one field must result in a non-empty config (chat
+   *     OR embedding). Otherwise 400.
    */
   r.post('/api/llm/config', async (req: Request, res: Response) => {
-    const body = req.body as Partial<LlmConfig> | undefined;
-    if (!body?.provider || !body?.baseUrl || !body?.model) {
-      return res.status(400).json({
-        ok: false,
-        message: 'provider, baseUrl, and model are required (apiKey may be empty for Ollama)',
-      });
-    }
-    if (!/^https?:\/\//.test(body.baseUrl)) {
-      return res.status(400).json({ ok: false, message: 'baseUrl must start with http:// or https://' });
-    }
-    // v0.1.22 SSRF guard: refuse baseUrls that resolve to private/loopback
-    // addresses (loopback, RFC1918, link-local incl. cloud metadata, ULA).
-    // Dev-only bypass: HA_LLM_ALLOW_PRIVATE_HOSTS=1.
-    {
-      const v = await ensurePublicBaseUrl('llm.config', body.baseUrl);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+
+    // Read existing llm to support partial updates.
+    let existingLlm: Partial<LlmConfig> = {};
+    try {
+      const cfg = loadConfig();
+      if (cfg.llm) existingLlm = cfg.llm;
+    } catch { /* no existing — first-time setup */ }
+
+    const has = (k: string): boolean => Object.prototype.hasOwnProperty.call(body, k);
+    const isUnset = (v: unknown): boolean => v === null || v === undefined;
+    const pick = (k: string, fallback: string | undefined): string | undefined => {
+      if (!has(k)) return fallback;
+      const v = body[k];
+      if (isUnset(v) || v === '') return undefined;
+      return String(v);
+    };
+
+    // Chat fields: resolve from body or existing
+    const isTouchingChat = has('provider') || has('baseUrl') || has('apiKey') || has('model');
+    let newProvider = pick('provider', existingLlm.provider);
+    let newBaseUrl  = pick('baseUrl',  existingLlm.baseUrl);
+    let newApiKey   = pick('apiKey',   existingLlm.apiKey) ?? '';
+    let newModel    = pick('model',    existingLlm.model);
+
+    if (isTouchingChat) {
+      if (!newProvider || !newBaseUrl || !newModel) {
+        return res.status(400).json({
+          ok: false,
+          message: 'provider, baseUrl, and model are required when updating chat (apiKey may be empty for Ollama)',
+        });
+      }
+      if (!/^https?:\/\//.test(newBaseUrl)) {
+        return res.status(400).json({ ok: false, message: 'baseUrl must start with http:// or https://' });
+      }
+      // v0.1.22 SSRF guard
+      const v = await ensurePublicBaseUrl('llm.config', newBaseUrl);
       if (!v.ok) {
         return res.status(400).json({
           ok: false,
@@ -113,19 +151,169 @@ export function createLlmRouter(): Router {
         });
       }
     }
-    const newLlm: LlmConfig = {
-      provider: body.provider,
-      baseUrl: body.baseUrl,
-      apiKey: body.apiKey ?? '',
-      model: body.model,
+
+    // Embedding fields: apply with the unset / null / value semantics
+    const newLlm: Partial<LlmConfig> = { ...existingLlm };
+    if (isTouchingChat) {
+      newLlm.provider = newProvider!;
+      newLlm.baseUrl = newBaseUrl!;
+      newLlm.apiKey = newApiKey;
+      newLlm.model = newModel!;
+    }
+    for (const key of ['embeddingModel', 'embeddingBaseUrl', 'embeddingApiKey'] as const) {
+      if (has(key)) {
+        const v = body[key];
+        if (isUnset(v) || v === '') {
+          delete newLlm[key];
+        } else {
+          newLlm[key] = String(v);
+        }
+      }
+    }
+
+    // Require at least chat OR embedding to be set
+    if (!newLlm.provider && !newLlm.embeddingModel) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Either chat (provider+baseUrl+model) or embedding (embeddingModel) must be set',
+      });
+    }
+
+    // Build the full LlmConfig that we'll persist. writeAppConfig
+    // expects a complete LlmConfig (not partial) — fill missing
+    // required fields with empty strings so the saved file is
+    // well-formed. The chat LLM may not be configured at all (RAG-
+    // only), in which case provider/baseUrl/apiKey/model are all ''.
+    const persisted: LlmConfig = {
+      provider: newLlm.provider ?? '',
+      baseUrl: newLlm.baseUrl ?? '',
+      apiKey: newLlm.apiKey ?? '',
+      model: newLlm.model ?? '',
     };
+    if (newLlm.embeddingModel) persisted.embeddingModel = newLlm.embeddingModel;
+    if (newLlm.embeddingBaseUrl) persisted.embeddingBaseUrl = newLlm.embeddingBaseUrl;
+    if (newLlm.embeddingApiKey) persisted.embeddingApiKey = newLlm.embeddingApiKey;
+
     try {
-      await writeAppConfig({ llm: newLlm });
-      logger.info({ provider: newLlm.provider, model: newLlm.model }, 'LLM config updated');
-      res.json({ ok: true, llm: maskLlmConfig(newLlm) });
+      await writeAppConfig({ llm: persisted });
+      logger.info({
+        provider: persisted.provider || '<unset>',
+        model: persisted.model || '<unset>',
+        embedding: persisted.embeddingModel ? 'configured' : 'cleared',
+      }, 'LLM config updated');
+      res.json({ ok: true, llm: maskLlmConfig(persisted) });
     } catch (e) {
       logger.error({ err: (e as Error).message }, 'failed to write LLM config');
       res.status(500).json({ ok: false, message: (e as Error).message });
+    }
+  });
+
+  /**
+   * v0.4.0: POST /api/llm/test-embedding
+   * Probe the embedding endpoint with a tiny `["probe"]` input and
+   * return the response vector dimension + latency. Used by the
+   * /setup wizard step 3 "Test" button to verify the embedding
+   * configuration before the user moves on.
+   *
+   * Body semantics mirror /api/llm/test:
+   *   - body.baseUrl / body.apiKey / body.model (all optional): override
+   *     saved config. When provided, the probe uses them.
+   *   - empty body or partial body: use saved config. Falls back to
+   *     llm.embeddingModel / llm.embeddingBaseUrl ?? llm.baseUrl /
+   *     llm.embeddingApiKey ?? llm.apiKey.
+   *
+   * Returns: { ok: true, dim, latencyMs, model } on success.
+   *          { ok: false, code, message } on failure.
+   */
+  r.post('/api/llm/test-embedding', async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as { baseUrl?: string; apiKey?: string; model?: string };
+
+    if (body.baseUrl) {
+      const v = await ensurePublicBaseUrl('llm.test-embedding', body.baseUrl);
+      if (!v.ok) {
+        return res.status(400).json({
+          ok: false,
+          code: 'PRIVATE_HOST_BLOCKED',
+          message: `baseUrl rejected: ${v.reason}. ` +
+            `Set HA_LLM_ALLOW_PRIVATE_HOSTS=1 to allow (development only).`,
+        });
+      }
+    }
+
+    // Resolve the test config: override → saved
+    let testBaseUrl = body.baseUrl;
+    let testApiKey  = body.apiKey;
+    let testModel   = body.model;
+    if (!testBaseUrl || !testModel) {
+      try {
+        const cfg = loadConfig();
+        if (!cfg.llm) {
+          return res.status(400).json({
+            ok: false,
+            message: 'No saved config — pass baseUrl + model in the body',
+          });
+        }
+        testBaseUrl = testBaseUrl ?? cfg.llm.embeddingBaseUrl ?? cfg.llm.baseUrl ?? '';
+        testApiKey  = testApiKey  ?? cfg.llm.embeddingApiKey  ?? cfg.llm.apiKey  ?? '';
+        testModel   = testModel   ?? cfg.llm.embeddingModel   ?? '';
+      } catch {
+        return res.status(400).json({
+          ok: false,
+          message: 'No saved config — pass baseUrl + model in the body',
+        });
+      }
+    }
+
+    if (!testBaseUrl || !testModel) {
+      return res.status(400).json({
+        ok: false,
+        message: 'embedding baseUrl and model are required (either in body or in saved config)',
+      });
+    }
+
+    // Tiny probe: a single short string. Some providers (Ollama before
+    // 0.1.32) reject empty inputs, so always pass at least one token.
+    const url = `${testBaseUrl.replace(/\/$/, '')}/embeddings`;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (testApiKey) headers.Authorization = `Bearer ${testApiKey}`;
+
+    const t0 = Date.now();
+    try {
+      const r2 = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ input: ['probe'], model: testModel }),
+      });
+      const latencyMs = Date.now() - t0;
+      if (!r2.ok) {
+        const text = await r2.text();
+        return res.status(502).json({
+          ok: false,
+          message: `Embedding ${r2.status} ${r2.statusText}: ${text.slice(0, 300)}`,
+        });
+      }
+      const respBody = (await r2.json()) as {
+        data?: { embedding: number[]; index?: number }[];
+        model?: string;
+      } | number[][];
+
+      let dim = 0;
+      let upstreamModel = testModel;
+      if (Array.isArray(respBody)) {
+        dim = respBody[0]?.length ?? 0;
+      } else if (respBody.data?.[0]?.embedding) {
+        dim = respBody.data[0].embedding.length;
+        upstreamModel = respBody.model ?? testModel;
+      }
+      if (dim === 0) {
+        return res.status(502).json({
+          ok: false,
+          message: 'embedding response missing data[0].embedding',
+        });
+      }
+      res.json({ ok: true, dim, latencyMs, model: upstreamModel });
+    } catch (e) {
+      res.status(502).json({ ok: false, message: (e as Error).message });
     }
   });
 
