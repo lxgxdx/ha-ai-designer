@@ -56,14 +56,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # v0.5.0-alpha.2: pnpm must be installed BEFORE actions/setup-node,
+      # otherwise the `cache: pnpm` option fails with "Unable to locate
+      # executable file: pnpm". The official pnpm/action-setup handles
+      # the version pin + PATH setup.
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
-
-      - name: Install pnpm
-        run: npm install -g pnpm@10.33.2
 
       # v0.5.0: daemon has better-sqlite3 (native build) and
       # electron has a postinstall that fetches ~100MB. On
