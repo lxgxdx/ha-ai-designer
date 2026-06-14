@@ -28,11 +28,13 @@ exec > >(tee -a /data/logs/run.log) 2>&1
 bashio::log.info "Reading add-on options..."
 LOG_LEVEL=$(bashio::config 'log_level' 'info')          || LOG_LEVEL='info'
 INGRESS_PORT=$(bashio::config 'ingress_port' '3000')    || INGRESS_PORT='3000'
-# v0.1.21: trim trailing whitespace from user-supplied paths. Users have
-# shipped data_dir="/data " (trailing space) in past incidents, which
-# caused every subsequent ${DATA_DIR}/... path to be interpreted as a
-# literal filename with a space in the middle (e.g. "/data /config.json").
-DATA_DIR=$(bashio::config 'data_dir' '/data' | xargs)   || DATA_DIR='/data'
+# v0.3.1: data_dir is no longer a user-settable option (CLAUDE.md 14 课
+# #11 footgun: a v0.1.20 incident saw users ship "/data " with a trailing
+# space, which broke every downstream ${DATA_DIR}/... path. The v0.1.21
+# fix was `| xargs` to trim, but the schema field still gave users a way
+# to shoot themselves. v0.3.1 removes the field entirely — /data is
+# always the add-on's persistent volume, full stop.)
+DATA_DIR='/data'
 LLM_PROVIDER=$(bashio::config 'llm_provider' '')        || LLM_PROVIDER=''
 LLM_BASE_URL=$(bashio::config 'llm_base_url' '')        || LLM_BASE_URL=''
 LLM_MODEL=$(bashio::config 'llm_model' '')              || LLM_MODEL=''
@@ -45,14 +47,6 @@ LLM_API_KEY=$(bashio::config 'llm_api_key' '')          || LLM_API_KEY=''
 EMBEDDING_BASE_URL=$(bashio::config 'embedding_base_url' '' | xargs)  || EMBEDDING_BASE_URL=''
 EMBEDDING_MODEL=$(bashio::config 'embedding_model' '' | xargs)        || EMBEDDING_MODEL=''
 EMBEDDING_API_KEY=$(bashio::config 'embedding_api_key' '' | xargs)    || EMBEDDING_API_KEY=''
-# v0.3.0.0: hha-knowledge wiki location. The add-on's config.yaml
-# bind-mounts the supervisor share root at /share; this value is
-# appended to that. Default "hha-knowledge" maps to /share/hha-knowledge
-# inside the container, which the daemon reads via HA_KNOWLEDGE_DIR.
-# The user is expected to populate /share/hha-knowledge/ on the HA
-# host (e.g. via scp / rsync from their dev machine — see CLAUDE.md
-# 14 课 #14 for the build-context rationale).
-KNOWLEDGE_DIR=$(bashio::config 'knowledge_dir' 'hha-knowledge' | xargs)  || KNOWLEDGE_DIR='hha-knowledge'
 
 bashio::log.info "  data_dir=${DATA_DIR}  log_level=${LOG_LEVEL}  llm_provider=${LLM_PROVIDER}"
 
@@ -70,14 +64,28 @@ export NODE_ENV=production
 # and craft/ at runtime. The Dockerfile copies these into
 # /opt/ha-ai-designer/ alongside apps/.
 export HA_REPO_ROOT=/opt/ha-ai-designer
-# v0.3.0.0: tell the daemon where to find hha-knowledge/. Comes from
-# the user-filled "knowledge_dir" add-on option, resolved against
-# /share (the supervisor share root bind-mounted by config.yaml's
-# `map`). When the path doesn't exist or is empty, the daemon falls
-# back to "no knowledge" mode (RAG disabled, v0.3.0 summary block
-# omitted) — i.e. a misconfigured knowledge_dir degrades gracefully
-# rather than failing the boot.
-export HA_KNOWLEDGE_DIR="/share/${KNOWLEDGE_DIR}"
+
+# v0.3.1: bake hha-knowledge into the image at build time. The
+# Dockerfile `git clone`s it to /opt/hha-knowledge. On every container
+# start, we (a) make sure the persistent /data/hha-knowledge exists
+# (it's where .feedback/ lives across restarts and re-pushes of the
+# add-on image), (b) seed it with the image-bundled wiki on FIRST
+# boot only (the .initialized sentinel suppresses re-seeding so we
+# never clobber user edits), and (c) replace the image-bundled
+# /opt/hha-knowledge with a symlink to /data/hha-knowledge, so the
+# daemon's HA_KNOWLEDGE_DIR path stays stable while writes are
+# persisted in the supervisor-managed /data volume.
+PERSIST_KNOWLEDGE_DIR="${DATA_DIR}/hha-knowledge"
+mkdir -p "${PERSIST_KNOWLEDGE_DIR}" 2>/dev/null || true
+if [ ! -f "${PERSIST_KNOWLEDGE_DIR}/.initialized" ] && [ -d /opt/hha-knowledge ]; then
+  bashio::log.info "  Seeding /data/hha-knowledge from image-bundled wiki (first boot only)..."
+  cp -rn /opt/hha-knowledge/. "${PERSIST_KNOWLEDGE_DIR}/" 2>/dev/null || true
+  touch "${PERSIST_KNOWLEDGE_DIR}/.initialized"
+fi
+rm -rf /opt/hha-knowledge 2>/dev/null || true
+ln -sf "${PERSIST_KNOWLEDGE_DIR}" /opt/hha-knowledge
+export HA_KNOWLEDGE_DIR=/opt/hha-knowledge
+bashio::log.info "  hha-knowledge: ${HA_KNOWLEDGE_DIR} (-> ${PERSIST_KNOWLEDGE_DIR})"
 
 # 2. Persist config.json — single block, merge ha/llm/embedding
 #    sections. v0.3.1.1 refactor: the v0.1.20 "two if blocks overwrite
@@ -103,11 +111,16 @@ if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_
 
   # Read the existing sections we want to preserve. Default to '{}' so
   # jq-style fallbacks work even on first boot.
+  # v0.3.1.1: use jq directly (hassio base 16.3.2 ships jq 1.7.1) instead
+  # of bashio::jq, which doesn't pass --arg through correctly and
+  # rejects the multi-arg form we use below for the LLM section. The
+  # bashio::jq wrapper is convenient for one-arg filters but loses
+  # too much on anything more complex.
   EXISTING_HA='{}'
   EXISTING_LLM='{}'
   if [ -f "${DATA_DIR}/config.json" ]; then
-    EXISTING_HA=$(bashio::jq "${DATA_DIR}/config.json" '.ha // {}' 2>/dev/null || echo "{}")
-    EXISTING_LLM=$(bashio::jq "${DATA_DIR}/config.json" '.llm // {}' 2>/dev/null || echo "{}")
+    EXISTING_HA=$(jq -r '.ha // {}' "${DATA_DIR}/config.json" 2>/dev/null || echo "{}")
+    EXISTING_LLM=$(jq -r '.llm // {}' "${DATA_DIR}/config.json" 2>/dev/null || echo "{}")
   fi
 
   # Build the ha section
@@ -124,7 +137,7 @@ if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_
   # overwrite the 4 chat fields if the user supplied them this run.
   LLM_JSON="${EXISTING_LLM}"
   if [ -n "${LLM_API_KEY}" ]; then
-    LLM_JSON=$(echo "${LLM_JSON}" | bashio::jq \
+    LLM_JSON=$(echo "${LLM_JSON}" | jq \
       --arg provider "${LLM_PROVIDER}" \
       --arg baseUrl "${LLM_BASE_URL}" \
       --arg apiKey  "${LLM_API_KEY}" \
@@ -140,7 +153,7 @@ if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_
   # `?? null` fallback would not trigger on "" and we'd get a confusing
   # "baseUrl not configured" error).
   if [ -n "${EMBEDDING_MODEL}" ]; then
-    LLM_JSON=$(echo "${LLM_JSON}" | bashio::jq \
+    LLM_JSON=$(echo "${LLM_JSON}" | jq \
       --arg model "${EMBEDDING_MODEL}" \
       --arg baseUrl "${EMBEDDING_BASE_URL}" \
       --arg apiKey "${EMBEDDING_API_KEY}" \

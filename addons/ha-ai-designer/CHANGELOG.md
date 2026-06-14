@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.3.1 — 2026-06-14
+
+### Changed
+- **hha-knowledge is now baked into the image**. Previously the
+  add-on required a `map: ["share:rw"]` bind-mount and the user
+  had to provision `/share/hha-knowledge/` on the HA host
+  (rsync / scp / git clone). v0.3.1 removes that friction: the
+  Dockerfile `git clone`s `https://github.com/lxgxdx/hha-knowledge`
+  into `/opt/hha-knowledge` at build time. `run.sh` then mirrors
+  it into the supervisor-managed `/data/hha-knowledge` on first
+  boot and symlinks the image path to the persistent one, so the
+  daemon's `.feedback/` writes survive restarts. Net effect:
+  **zero hha-knowledge setup required at install time**.
+- **Removed the `data_dir` add-on option entirely**. v0.1.20 had a
+  bug where users shipped `/data ` with a trailing space, which
+  broke every downstream `${DATA_DIR}/...` path. v0.1.21 added
+  `| xargs` to trim, but the schema field still gave users a way
+  to shoot themselves. v0.3.1 takes the schema field out — the
+  add-on's persistent volume is always `/data`. CLAUDE.md 14 课 #11.
+- **Removed the `knowledge_dir` add-on option**. See above — the
+  hha-knowledge location is no longer user-configurable.
+- **Removed the `map: ["share:rw"]` from config.yaml**. The
+  add-on no longer needs the supervisor share directory. The image
+  carries the wiki; persistence goes through the standard `/data`
+  add-on volume.
+
+### Security
+- The hha-knowledge git clone runs in the **builder stage** of a
+  multi-stage build, so the `git` binary does NOT end up in the
+  runtime image. Final image stays ~550MB instead of growing by
+  ~30MB.
+- The `rm -rf /opt/hha-knowledge/.git` after clone strips git
+  metadata so the user's wiki history (potentially containing
+  commit emails or other personal data) is not embedded in image
+  layers.
+
+### Upgrade notes
+- v0.3.0 → v0.3.1 is a clean image swap. The supervisor-managed
+  `/data` volume is preserved across upgrades, so `config.json`
+  and `options.json` carry over. Any wiki content the user wrote
+  in `/data/hha-knowledge/wiki/` (rare for v0.3.0 since the schema
+  field was new) is also preserved.
+- To pull wiki updates after the initial install: push to
+  `lxgxdx/hha-knowledge` on GitHub, then re-build the add-on image
+  (`git commit` + `git push` to trigger CI; or `docker build
+  --build-arg HHA_KNOWLEDGE_REF=main -t ha-ai-designer:dev .` for
+  local iteration). The next supervisor install will use the new
+  image with the new wiki.
+
 ## 0.3.0 — 2026-06-14
 
 ### Added

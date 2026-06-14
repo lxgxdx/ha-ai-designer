@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.3.0"
+version: "0.3.1"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -24,21 +24,14 @@ ingress_port: 3000
 panel_icon: "mdi:robot"
 panel_title: "AI Designer"
 panel_admin: true
-# v0.3.0.0: bind-mount the HA supervisor "share" directory so the
-# add-on can read the user's hha-knowledge wiki (which lives outside
-# the daemon's git repo and so can't be COPYed into the build context
-# — see CLAUDE.md 14 课 #14 and #15). The user is expected to
-# populate /share/hha-knowledge/ on the HA host (e.g. via rsync / scp
-# from their dev machine, or a periodic push script). The add-on
-# then exposes this at /share inside the container; run.sh sets
-# HA_KNOWLEDGE_DIR to that path.
-#
-# Read-only (`:ro`) is enough — the daemon never writes to the wiki
-# (it only writes to .feedback/, which we put in the same tree so
-# feedback is colocated with the data it describes). If you change
-# to `:rw`, the daemon's appends will leak back to your host share.
-map:
-  - "share:rw"
+# v0.3.1: no map entries. hha-knowledge is now baked into the image
+# at build time (Dockerfile `git clone`s it into /opt/hha-knowledge,
+# see CLAUDE.md 14 课 #14 for the build-context rationale and the
+# GitHub URL configuration). run.sh then bind-mounts a persistence
+# copy at /data/hha-knowledge via symlink, so the daemon's .feedback/
+# writes survive container restarts without needing the user to
+# provision any host path. Net effect: zero hha-knowledge setup
+# required at install time.
 ports:
   "7456/tcp": null
   "3000/tcp": null
@@ -51,7 +44,6 @@ services:
   - "mqtt:need"
 schema:
   log_level: "list(trace|debug|info|notice|warning|error|fatal)"
-  data_dir: "str"
   llm_provider: "list(minimax|openai|anthropic|qwen|zhipu|moonshot|ollama|custom)"
   llm_base_url: "url"
   llm_model: "str"
@@ -69,17 +61,4 @@ schema:
   embedding_base_url: "url?"
   embedding_model: "str"
   embedding_api_key: "password?"
-  # v0.3.0.0: path to the hha-knowledge wiki, RELATIVE to the
-  # supervisor share root. The add-on's `map: ["share:rw"]` above
-  # exposes that root at /share inside the container; this config
-  # value is appended to it. Default: "hha-knowledge" → the daemon
-  # will read /share/hha-knowledge/wiki/index.md at startup.
-  #
-  # To populate it from your dev machine (where hha-knowledge lives at
-  # E:\Claude\hha-knowledge on the user's setup), the recommended
-  # one-liner is:
-  #   scp -r E:\Claude\hha-knowledge hassio@192.168.88.183:/usr/share/hassio/share/
-  # (Adjust for your HA host. Re-run after wiki changes — or wire up
-  # a cron / systemd timer.)
-  knowledge_dir: "str"
 image: "ghcr.io/lxgxdx/ha-ai-designer"

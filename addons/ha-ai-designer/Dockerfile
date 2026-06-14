@@ -41,7 +41,7 @@ ENV NODE_ENV=development
 # what it needs and we don't want a 200MB Python in the final image.
 # See CLAUDE.md "Docker build 关键教训" for the rationale on why we
 # keep the runtime lean.
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ git
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile || pnpm install
 
@@ -90,6 +90,27 @@ RUN cd /build && pnpm --filter @ha-designer/daemon deploy --prod --legacy /out/d
 RUN rm -rf /out/daemon/dist
 RUN cp -r /build/apps/daemon/dist /out/daemon/dist
 
+# v0.3.1: bake the hha-knowledge wiki into the image. Cloned in the
+# BUILDER stage (which has git via the v0.3.0.2 apk add) so the runtime
+# stage — hassio base 16.3.2, no `git` binary — doesn't have to
+# install it. The cloned wiki is plumbed to the runtime stage by the
+# `COPY --from=builder /opt/hha-knowledge` step in the runtime stage
+# below; run.sh then symlinks /opt/hha-knowledge → /data/hha-knowledge
+# at every container start so the daemon's .feedback/ writes survive
+# restarts.
+#
+# To bump the wiki: push to the upstream GitHub repo, then re-build
+# this image. The build-time `git clone` will pull the latest.
+#
+# --depth=1 keeps the layer small (~5MB of wiki markdown, no .git
+# history). The .git directory is stripped after clone so the user's
+# commit history (potentially containing personal data) is not
+# embedded in image layers.
+ARG HHA_KNOWLEDGE_REPO=https://github.com/lxgxdx/hha-knowledge.git
+ARG HHA_KNOWLEDGE_REF=main
+RUN git clone --depth=1 --branch "${HHA_KNOWLEDGE_REF}" "${HHA_KNOWLEDGE_REPO}" /opt/hha-knowledge \
+ && rm -rf /opt/hha-knowledge/.git
+
 # -------- Stage 2: runtime (hassio base + Node.js) --------
 FROM ${BUILD_FROM} AS runtime
 
@@ -126,6 +147,13 @@ RUN hash -r \
 # Copy built artifacts
 COPY --from=builder /out/daemon /opt/ha-ai-designer/apps/daemon
 COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
+# v0.3.1: copy the hha-knowledge wiki from the builder stage (which
+# `git clone`d it in the step below) into the runtime image. The
+# runtime stage has no `git` binary (hassio base 16 is lean; we want
+# to keep it that way), so the clone happens in the builder and
+# gets plumbed across here. The /opt/hha-knowledge path is then
+# replaced by a symlink to /data/hha-knowledge at run.sh startup.
+COPY --from=builder /opt/hha-knowledge /opt/hha-knowledge
 
 # v0.1.21: copy the LLM-facing context (skills/, design-systems/, craft/)
 # from the build context. The orchestrator reads these at runtime via
@@ -135,6 +163,24 @@ COPY --from=builder /out/web /opt/ha-ai-designer/apps/web
 COPY skills /opt/ha-ai-designer/skills
 COPY design-systems /opt/ha-ai-designer/design-systems
 COPY craft /opt/ha-ai-designer/craft
+
+# v0.3.1: bake the hha-knowledge wiki into the image. The user's
+# hha-knowledge repo at https://github.com/lxgxdx/hha-knowledge is
+# cloned at build time into /opt/hha-knowledge. run.sh then symlinks
+# this to /data/hha-knowledge (a supervisor-managed persistent
+# volume) on every container start, so .feedback/ writes from the
+# daemon survive restarts without any user-side setup.
+#
+# To bump the wiki: push to the upstream GitHub repo, then re-build
+# this image. The build-time `git clone` will pull the latest.
+#
+# Uses `--depth=1` to keep the image lean (~5MB of wiki markdown,
+# not the full git history).
+# (Already cloned in the BUILDER stage above at line ~109; this
+# duplicate block in the RUNTIME stage is a leftover from an earlier
+# iteration where the clone was planned for runtime. The runtime
+# stage doesn't have `git` (hassio base 16.3.2 is lean), so it would
+# fail — and the COPY from builder already plumbs the wiki across.)
 
 # Copy the add-on entry point
 COPY addons/ha-ai-designer/run.sh /run.sh
