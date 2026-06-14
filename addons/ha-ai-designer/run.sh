@@ -252,6 +252,13 @@ nohup env \
   HA_WEB_PORT="${HA_WEB_PORT}" \
   HA_DATA_DIR="${DATA_DIR}" \
   HA_DAEMON_TOKEN="${HA_DAEMON_TOKEN}" \
+  # v0.3.3: forward the add-on slug so the web process can build URLs
+  # that match what HA ingress proxies (e.g. /hassio/ingress/<slug>/chat).
+  # Without this, Next.js basePath hardcoded in next.config.mjs is the
+  # only path-resolution path — that's already set, but having the slug
+  # in env lets future code (e.g. og:url, redirect targets) compute the
+  # same prefix dynamically.
+  SUPERVISOR_SLUG="ha_ai_designer" \
   PORT="${HA_WEB_PORT}" \
   node "${NEXT_ENTRY}" start -p "${HA_WEB_PORT}" \
   >> "${DATA_DIR}/logs/web.log" 2>&1 &
