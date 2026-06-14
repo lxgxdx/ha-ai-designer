@@ -6,4 +6,3 @@
 export * from './api/health.js';
 export * from './api/ha.js';
 export * from './api/chat.js';
-export * from './internal-token.js';

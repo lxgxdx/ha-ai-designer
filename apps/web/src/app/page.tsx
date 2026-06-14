@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { getInternalToken } from '@ha-designer/contracts';
+import { getInternalToken } from '../lib/daemon-auth';
 
 /**
  * Entry view — v0.2.0.

@@ -19,10 +19,8 @@
  * daemon request 401 — Next.js's auto-retry on the second request
  * will pick up the token after daemon has had a moment to write it.
  *
- * The `getInternalToken` function (not const) is intentional: the
- * Next.js dev server HMRs modules, but the function form also lets
- * a serverless / route handler lazily resolve on each invocation
- * without re-importing.
+ * Lives in apps/web/src/lib/ (not packages/contracts) because
+ * contracts is intentionally pure-TS with no Node imports.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
