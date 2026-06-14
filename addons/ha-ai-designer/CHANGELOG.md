@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.3.0 — 2026-06-14
+
+### Added
+- **hha-knowledge wiki binding (RAG-ready)**. The orchestrator now
+  reads the user's hha-knowledge wiki at startup and injects two new
+  sections into the LLM system prompt:
+    1. A lightweight "Available knowledge" summary (every article's
+       title + 1-line description, derived from `wiki/index.md`) so
+       the LLM knows which card types / APIs / Jinja2 functions are
+       KNOWN. Roughly 1k tokens.
+    2. A `top-k=3..5` RAG snippet per brief — the chunks most relevant
+       to the user's specific request, with full content. This is
+       what the LLM actually uses to ground its YAML output.
+  Both blocks are empty when `HA_KNOWLEDGE_DIR` is unset, so v0.3.0
+  is fully backward compatible — no config needed to upgrade.
+- **`feedback` loop** (v0.3.2.3). New `POST /api/chat/feedback` writes
+  a one-line JSONL record per dashboard rating to
+  `${HA_KNOWLEDGE_DIR}/.feedback/feedback.jsonl`. The web UI shows
+  👍 / 👎 / optional-comment buttons after every generation.
+  `scripts/learn.ts` (v0.3.2.4, in the hha-knowledge repo) reads
+  the negative entries and asks the LLM to rewrite the relevant
+  wiki notes, with humans reviewing the candidates before they
+  land in `wiki/`.
+- **Independent RAG embedding endpoint** (v0.3.1.1). The add-on
+  Configuration now accepts `embedding_base_url` / `embedding_model`
+  / `embedding_api_key` separately from the chat LLM. Use cases:
+  chat via MiniMax + embeddings via a local `infinity` server
+  running BAAI/bge-m3; or chat via OpenAI + embeddings via
+  `text-embedding-3-small`. Both pieces can be the same provider
+  too — leave the embedding baseUrl blank and the daemon falls
+  back to `llm.baseUrl`.
+- **Soft card-type validation** (v0.3.0). The orchestrator now
+  emits a warning when the LLM produces a `type:` that is not in
+  the known built-in (51) + HACS (28) set. Catches obvious
+  hallucinations like `type: card-list` before they hit HA.
+- **hha-knowledge Linter** (v0.3.2.2, in the hha-knowledge repo).
+  `scripts/lint.ts` is a deterministic, no-LLM linter that enforces
+  800-line-per-article, Sources / Raw link / See Also presence,
+  index consistency, conflict-marker rules, mtime freshness. Run
+  with `pnpm scripts/lint`. Exits non-zero on FAIL.
+
+### Changed
+- `addons/ha-ai-designer/config.yaml` version bumped: `0.2.0` → `0.3.0`.
+- New `map: ["share:rw"]` top-level field — the add-on bind-mounts
+  the supervisor share root at `/share` so the daemon can read
+  `hha-knowledge/` (which lives outside the daemon's git repo and
+  therefore can't be COPYed into the build context). User fills
+  `knowledge_dir` (default `hha-knowledge`) in the add-on
+  Configuration; the daemon reads from `/share/${knowledge_dir}/`.
+- `addons/ha-ai-designer/run.sh` exports `HA_KNOWLEDGE_DIR` for
+  the orchestrator + RAG store + feedback writer.
+- `data/config.json` schema gained `llm.embeddingBaseUrl?`,
+  `llm.embeddingApiKey?`, `llm.embeddingModel?` (v0.3.1.1).
+- `apps/daemon/src/llm-orchestrator.ts` adds 53 lines of
+  `KNOWN_HA_CARD_TYPES` (whitelist) and 91 lines of wiki-summary
+  parser. No breaking change to existing orchestrator callers.
+
+### Security
+- v0.3.0 RAG never re-invents card types — it asks the LLM to
+  cite the wiki, and unknown types surface as warnings. No code-
+  execution risk from the wiki content (markdown only).
+- `feedback` is gated behind the same internal-auth middleware as
+  every other daemon route (X-Addon-Internal-Token). When called
+  via the browser it goes through `/api/daemon/[...path]` which
+  runs the CSRF Origin check.
+- The `HA_KNOWLEDGE_DIR` path the user supplies is NEVER
+  shell-expanded by run.sh beyond a `| xargs` trim — Bash 3.x
+  command-substitution injection is not a concern.
+- The RAG embedding client (`apps/daemon/src/embedding-client.ts`)
+  reuses the same SSRF guard as the LLM client: if a future
+  `embeddingBaseUrl` is set to a private IP, the daemon will warn
+  on startup (or refuse outright if `HA_LLM_ALLOW_PRIVATE_HOSTS`
+  is not set).
+
+### Known limitations
+- **RAG only triggers if** the LLM BYOK is configured AND an
+  embedding model is configured. With neither, the daemon runs in
+  v0.2.0-equivalent mode (no wiki awareness).
+- **Windows typecheck noise**: `@types/express@4.17.21` ships a
+  half-baked namespace merge that `tsc` flags as
+  "Property 'path' does not exist on Request" / similar for ~122
+  lines under strict mode. These are upstream typing bugs, not
+  runtime issues — the code runs fine. v0.4.x should bump to
+  `@types/express@5.x` (breaking; deferred to a dedicated PR).
+- **No aarch64 build** in CI. The matrix only builds amd64; the
+  `arch: [amd64, aarch64]` list in `config.yaml` documents the
+  intent. See CLAUDE.md 14 课 #7 for the multi-arch manifest merge
+  workaround when we get to it.
+
 ## 0.2.0 — 2026-06-13
 
 ### Added

@@ -37,6 +37,22 @@ LLM_PROVIDER=$(bashio::config 'llm_provider' '')        || LLM_PROVIDER=''
 LLM_BASE_URL=$(bashio::config 'llm_base_url' '')        || LLM_BASE_URL=''
 LLM_MODEL=$(bashio::config 'llm_model' '')              || LLM_MODEL=''
 LLM_API_KEY=$(bashio::config 'llm_api_key' '')          || LLM_API_KEY=''
+# v0.3.1.1: independent RAG embedding endpoint. Optional — when unset,
+# the daemon falls back to llm_base_url (for providers that also serve
+# /v1/embeddings, e.g. OpenAI / some MiniMax setups). Set both
+# embedding_base_url + embedding_model to use a dedicated endpoint
+# (recommended: local infinity + BAAI/bge-m3, separate from chat LLM).
+EMBEDDING_BASE_URL=$(bashio::config 'embedding_base_url' '' | xargs)  || EMBEDDING_BASE_URL=''
+EMBEDDING_MODEL=$(bashio::config 'embedding_model' '' | xargs)        || EMBEDDING_MODEL=''
+EMBEDDING_API_KEY=$(bashio::config 'embedding_api_key' '' | xargs)    || EMBEDDING_API_KEY=''
+# v0.3.0.0: hha-knowledge wiki location. The add-on's config.yaml
+# bind-mounts the supervisor share root at /share; this value is
+# appended to that. Default "hha-knowledge" maps to /share/hha-knowledge
+# inside the container, which the daemon reads via HA_KNOWLEDGE_DIR.
+# The user is expected to populate /share/hha-knowledge/ on the HA
+# host (e.g. via scp / rsync from their dev machine — see CLAUDE.md
+# 14 课 #14 for the build-context rationale).
+KNOWLEDGE_DIR=$(bashio::config 'knowledge_dir' 'hha-knowledge' | xargs)  || KNOWLEDGE_DIR='hha-knowledge'
 
 bashio::log.info "  data_dir=${DATA_DIR}  log_level=${LOG_LEVEL}  llm_provider=${LLM_PROVIDER}"
 
@@ -54,52 +70,116 @@ export NODE_ENV=production
 # and craft/ at runtime. The Dockerfile copies these into
 # /opt/ha-ai-designer/ alongside apps/.
 export HA_REPO_ROOT=/opt/ha-ai-designer
+# v0.3.0.0: tell the daemon where to find hha-knowledge/. Comes from
+# the user-filled "knowledge_dir" add-on option, resolved against
+# /share (the supervisor share root bind-mounted by config.yaml's
+# `map`). When the path doesn't exist or is empty, the daemon falls
+# back to "no knowledge" mode (RAG disabled, v0.3.0 summary block
+# omitted) — i.e. a misconfigured knowledge_dir degrades gracefully
+# rather than failing the boot.
+export HA_KNOWLEDGE_DIR="/share/${KNOWLEDGE_DIR}"
 
-# 2. Pre-warm the HA token FIRST: if homeassistant_api: true and
-#    SUPERVISOR_TOKEN is set, write a ha-only config.json so the daemon
-#    can call HA via the supervisor proxy without a long-lived user token.
+# 2. Persist config.json — single block, merge ha/llm/embedding
+#    sections. v0.3.1.1 refactor: the v0.1.20 "two if blocks overwrite
+#    each other" bug pattern is gone. We read the existing config first,
+#    then layer the three optional sections in, then write once. Any
+#    section the user didn't set on this restart is PRESERVED from the
+#    previous run (this matters when the user clears a field — the old
+#    value stays until the user explicitly empties the value AND we
+#    re-render the file; for the typical "fill in once and stay" case
+#    this is exactly what we want).
 #
-#    v0.1.21: this block runs BEFORE the LLM block (it used to run after).
-#    In v0.1.20 the two blocks were not mutually exclusive: the LLM block
-#    wrote {ha, llm} but then immediately the supervisor block re-wrote
-#    {ha}-only, dropping the llm block. Reordering means the LLM block
-#    (step 3) can now read the just-written ha block and merge it in.
-if [ -n "${SUPERVISOR_TOKEN}" ]; then
-  bashio::log.info "Persisting HA token (supervisor) to ${DATA_DIR}/config.json"
-  HA_BASE_URL="http://supervisor/core"
-  HA_TOKEN="${SUPERVISOR_TOKEN}"
-  cat > "${DATA_DIR}/config.json" <<EOF
-{
-  "ha": {
-    "baseUrl": "${HA_BASE_URL}",
-    "token": "${HA_TOKEN}"
-  }
-}
-EOF
-  chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
-fi
+#    Sections:
+#      ha:         { baseUrl, token }   — from SUPERVISOR_TOKEN
+#      llm:        { provider, baseUrl, apiKey, model }
+#      llm.embed*: { embeddingModel, embeddingBaseUrl?, embeddingApiKey? }
+#
+#    RAG-only deployments can leave llm.{provider,baseUrl,apiKey,model}
+#    empty and only set embedding_* — loadLlmConfig() in the daemon will
+#    throw on /api/chat, but the RAG store (loadEmbeddingConfig) indexes
+#    just fine.
+if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_MODEL}" ]; then
+  bashio::log.info "Persisting config to ${DATA_DIR}/config.json (apiKey masked in logs)"
 
-# 3. LLM config: if user provided, merge into data/config.json so the
-#    daemon can pick it up via loadLlmConfig(). Reads the existing ha
-#    block (just written by step 2) and preserves it.
-if [ -n "${LLM_API_KEY}" ]; then
-  bashio::log.info "Persisting LLM config to ${DATA_DIR}/config.json (apiKey masked in logs)"
-  HA_TOKEN_PRESERVED=""
+  # Read the existing sections we want to preserve. Default to '{}' so
+  # jq-style fallbacks work even on first boot.
+  EXISTING_HA='{}'
+  EXISTING_LLM='{}'
   if [ -f "${DATA_DIR}/config.json" ]; then
-    HA_TOKEN_PRESERVED=$(bashio::jq "${DATA_DIR}/config.json" '.ha // {}' 2>/dev/null || echo "{}")
+    EXISTING_HA=$(bashio::jq "${DATA_DIR}/config.json" '.ha // {}' 2>/dev/null || echo "{}")
+    EXISTING_LLM=$(bashio::jq "${DATA_DIR}/config.json" '.llm // {}' 2>/dev/null || echo "{}")
   fi
-  cat > "${DATA_DIR}/config.json" <<EOF
+
+  # Build the ha section
+  HA_JSON='{}'
+  if [ -n "${SUPERVISOR_TOKEN}" ]; then
+    HA_JSON="{\"baseUrl\": \"http://supervisor/core\", \"token\": \"${SUPERVISOR_TOKEN}\"}"
+    bashio::log.info "  ha: supervisor token (baseUrl=http://supervisor/core)"
+  elif [ "${EXISTING_HA}" != "{}" ]; then
+    HA_JSON="${EXISTING_HA}"
+    bashio::log.info "  ha: preserving previous config"
+  fi
+
+  # Build the llm chat section. We layer: existing LLM first, then
+  # overwrite the 4 chat fields if the user supplied them this run.
+  LLM_JSON="${EXISTING_LLM}"
+  if [ -n "${LLM_API_KEY}" ]; then
+    LLM_JSON=$(echo "${LLM_JSON}" | bashio::jq \
+      --arg provider "${LLM_PROVIDER}" \
+      --arg baseUrl "${LLM_BASE_URL}" \
+      --arg apiKey  "${LLM_API_KEY}" \
+      --arg model   "${LLM_MODEL}" \
+      '. + {provider: $provider, baseUrl: $baseUrl, apiKey: $apiKey, model: $model}')
+    bashio::log.info "  llm: ${LLM_PROVIDER} ${LLM_MODEL} (apiKey masked)"
+  fi
+
+  # Build the embedding sub-section. Independent of LLM chat — user can
+  # set embedding_* without touching llm_* and vice versa. We use jq's
+  # object-spread trick (`+ {}`) to conditionally include keys so that
+  # empty user inputs are NOT written as empty strings (the daemon's
+  # `?? null` fallback would not trigger on "" and we'd get a confusing
+  # "baseUrl not configured" error).
+  if [ -n "${EMBEDDING_MODEL}" ]; then
+    LLM_JSON=$(echo "${LLM_JSON}" | bashio::jq \
+      --arg model "${EMBEDDING_MODEL}" \
+      --arg baseUrl "${EMBEDDING_BASE_URL}" \
+      --arg apiKey "${EMBEDDING_API_KEY}" \
+      '. + (
+        {embeddingModel: $model}
+        + (if $baseUrl != "" then {embeddingBaseUrl: $baseUrl} else {} end)
+        + (if $apiKey  != "" then {embeddingApiKey:  $apiKey}  else {} end)
+      )')
+    bashio::log.info "  llm.embedding: ${EMBEDDING_MODEL} ${EMBEDDING_BASE_URL:+@ ${EMBEDDING_BASE_URL}}"
+  fi
+
+  # Write the final config.json. Empty llm block is fine (e.g. user set
+  # only embedding_*) — loadLlmConfig() will throw on /api/chat but the
+  # RAG store will load from loadEmbeddingConfig() instead.
+  if [ "${HA_JSON}" = "{}" ] && [ "${LLM_JSON}" = "{}" ]; then
+    bashio::log.warning "No ha or llm config to persist; skipping config.json write"
+  else
+    if [ "${HA_JSON}" = "{}" ]; then
+      cat > "${DATA_DIR}/config.json" <<EOF
 {
-  "ha": ${HA_TOKEN_PRESERVED},
-  "llm": {
-    "provider": "${LLM_PROVIDER}",
-    "baseUrl": "${LLM_BASE_URL}",
-    "apiKey": "${LLM_API_KEY}",
-    "model": "${LLM_MODEL}"
-  }
+  "llm": ${LLM_JSON}
 }
 EOF
-  chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
+    elif [ "${LLM_JSON}" = "{}" ]; then
+      cat > "${DATA_DIR}/config.json" <<EOF
+{
+  "ha": ${HA_JSON}
+}
+EOF
+    else
+      cat > "${DATA_DIR}/config.json" <<EOF
+{
+  "ha": ${HA_JSON},
+  "llm": ${LLM_JSON}
+}
+EOF
+    fi
+    chmod 0600 "${DATA_DIR}/config.json" 2>/dev/null || true
+  fi
 fi
 
 # 3.5. Kill any previous run's daemon/web processes. s6 restarts run.sh on

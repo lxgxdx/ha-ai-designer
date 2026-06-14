@@ -40,17 +40,20 @@ const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
 // Path allowlist. /api/chat is matched exactly; the rest are prefix
 // matches (so /api/ha/ping, /api/ha/entities, /api/llm/config etc.
 // are all proxied).
-const ALLOWED_EXACT = new Set(['/api/chat', '/api/health']);
+const ALLOWED_EXACT = new Set(['/api/chat', '/api/chat/feedback', '/api/health']);
 const ALLOWED_PREFIXES = ['/api/ha/', '/api/llm/'];
 
 // Per-path method overrides. Most read endpoints accept GET only;
 // /api/chat is the one streaming-write surface (POST /api/chat with
-// the SSE body response). All other writes (POST /api/llm/config,
-// POST /api/ha/config, POST /api/ha/dashboards/preview, etc.) must
-// go through server components that hit the daemon directly with the
-// server-side token, NOT through this browser-reachable proxy.
+// the SSE body response). v0.3.2.3: /api/chat/feedback is also POST
+// (user ratings on generated output, writes to .feedback/feedback.jsonl).
+// All other writes (POST /api/llm/config, POST /api/ha/config,
+// POST /api/ha/dashboards/preview, etc.) must go through server
+// components that hit the daemon directly with the server-side token,
+// NOT through this browser-reachable proxy.
 const ALLOWED_METHODS_FOR_PATH: Record<string, string[]> = {
   '/api/chat': ['GET', 'POST'],
+  '/api/chat/feedback': ['POST'],
 };
 
 // Headers the browser is allowed to set on the proxied request.

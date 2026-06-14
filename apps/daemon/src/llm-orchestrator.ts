@@ -16,7 +16,52 @@ import yaml from 'js-yaml';
 import { chat, chatStream, ChatMessage } from './llm-client.js';
 import { haRequest } from './ha-client.js';
 import { logger } from './logger.js';
+import { searchRelevantAsync } from './rag-store.js';
 import type { LovelaceConfig } from '@ha-designer/contracts';
+
+/**
+ * Known HA card `type` strings — used for soft validation. Anything the
+ * LLM emits that's not in this set gets a warning ("Unknown card type"),
+ * which is informational, not blocking. Sources:
+ *   - hha-knowledge/wiki/cards/built-in-cards-overview.md (51 built-in)
+ *   - hha-knowledge/wiki/cards/hacs-custom-cards.md (HACS)
+ *   - piitaya/lovelace-mushroom (mushroom family — `custom:mushroom-*`)
+ *   - custom-cards/button-card, card-mod, layout-card (the other 3 HACS)
+ *
+ * HACS cards keep their `custom:` prefix here. v0.3.1 (RAG) can replace
+ * this hardcoded set with a dynamic scan over the wiki + HACS README files,
+ * but for v0.3.0 the hardcoded set is enough to catch obvious hallucinations
+ * like `type: card-list` or `type: entities-card`.
+ */
+const KNOWN_HA_CARD_TYPES: ReadonlySet<string> = new Set([
+  // built-in 主力 (built-in-cards-overview.md "主力卡")
+  'tile', 'entities', 'button', 'markdown', 'glance', 'vertical-stack',
+  'horizontal-stack', 'grid', 'conditional', 'picture-glance', 'picture-entity',
+  'picture-elements', 'light', 'thermostat', 'humidifier', 'weather-forecast',
+  'history-graph', 'statistics-graph',
+  // built-in 专用
+  'alarm-panel', 'calendar', 'map', 'media-control', 'plant-status',
+  'shopping-list', 'todo-list', 'logbook', 'updates', 'repairs', 'iframe',
+  'sensor', 'gauge', 'statistic',
+  // sections 视图专用 (2024.3+)
+  'heading', 'home-summary',
+  // 容器基类 (一般不直接用，但 orchestrator 可能误用)
+  'card', 'entity-card', 'stack-card',
+  // HACS: mushroom 家族 (19 张)
+  'custom:mushroom-entity-card', 'custom:mushroom-light-card',
+  'custom:mushroom-climate-card', 'custom:mushroom-cover-card',
+  'custom:mushroom-fan-card', 'custom:mushroom-media-player-card',
+  'custom:mushroom-vacuum-card', 'custom:mushroom-humidifier-card',
+  'custom:mushroom-lock-card', 'custom:mushroom-person-card',
+  'custom:mushroom-template-card', 'custom:mushroom-chips-card',
+  'custom:mushroom-title-card', 'custom:mushroom-number-card',
+  'custom:mushroom-select-card', 'custom:mushroom-update-card',
+  // HACS: 其他高频
+  'custom:button-card', 'custom:card-mod', 'custom:layout-card',
+  'custom:auto-entities', 'custom:apexcharts-card', 'custom:masonry-card',
+  'custom:bubble-card', 'custom:mini-graph-card', 'custom:scheduler-card',
+  'custom:maxim-dash',
+]);
 
 export interface OrchestrateRequest {
   /** The user-written brief, e.g. "做一个全屋概览，深蓝主题". */
@@ -159,6 +204,148 @@ function loadSkillText(skillName: string): string | null {
 }
 
 /**
+ * Load a lightweight summary of the hha-knowledge wiki and inject it into
+ * the system prompt.
+ *
+ * Reads `wiki/index.md` from $HA_KNOWLEDGE_DIR and extracts one line per
+ * article (title + summary) grouped by topic. This is INTENTIONALLY
+ * shallow — the full article body is NOT injected (it would blow the
+ * prompt to tens of thousands of tokens and is what v0.3.1 RAG top-k
+ * retrieval is for). The summary gives the LLM:
+ *   1. Awareness of which topics/cards/APIs are KNOWN to exist
+ *   2. Where to look (file path) for full content (debug-time reference)
+ *
+ * If $HA_KNOWLEDGE_DIR is unset, or wiki/index.md is missing, returns ''.
+ * The orchestrator treats this as "no knowledge available" and the LLM
+ * works from its training data alone — same behavior as v0.2.0.
+ *
+ * Local dev (pnpm tools-dev): the user sets HA_KNOWLEDGE_DIR to point at
+ *   E:\Claude\hha-knowledge\ (or wherever the wiki lives).
+ * Add-on: TODO v0.3.0.1 — bind-mount the host dir into the container
+ *   (hha-knowledge is OUTSIDE the daemon's git repo, so it can't be
+ *   COPYed into the build context).
+ */
+
+/**
+ * v0.3.1: do a RAG top-k search over the hha-knowledge wiki and inject
+ * the most relevant chunks into the system prompt. The light "Available
+ * knowledge" summary (v0.3.0) gives the LLM the table of contents; this
+ * gives it the actual content for whatever the brief is about.
+ *
+ * Returns '' if:
+ *   - the RAG store isn't initialized (embeddingModel unset, init failed)
+ *   - the search returns no hits
+ *   - any error happens (defensive — never let RAG kill a /api/chat)
+ *
+ * topK=3 is a safe default; bumped to 5 when the brief is long.
+ */
+async function loadRelevantArticles(brief: string): Promise<string> {
+  try {
+    const topK = brief.length > 200 ? 5 : 3;
+    const hits = await searchRelevantAsync(brief, topK);
+    if (hits.length === 0) return '';
+    const lines: string[] = [
+      '## Relevant knowledge (RAG top-' + topK + ' from hha-knowledge wiki)',
+      '',
+      'The following chunks from the local knowledge base are most relevant to this brief. ' +
+        'Use them to ground your YAML in real card types, API endpoints, and Jinja2 syntax. ' +
+        'If a chunk contradicts a "Available knowledge" summary, trust the chunk (it is more specific).',
+    ];
+    for (const h of hits) {
+      lines.push('');
+      lines.push(`### ${h.title} — ${h.section}  (${h.path}, dist=${h.distance.toFixed(3)})`);
+      lines.push(h.content.length > 1500 ? h.content.slice(0, 1500) + '\n…(truncated)' : h.content);
+    }
+    return lines.join('\n');
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, 'RAG search failed; skipping');
+    return '';
+  }
+}
+function loadWikiSummaries(): string {
+  const knowledgeDir = process.env.HA_KNOWLEDGE_DIR;
+  if (!knowledgeDir) return '';
+  const indexPath = join(knowledgeDir, 'wiki', 'index.md');
+  if (!existsSync(indexPath)) return '';
+  let content: string;
+  try {
+    content = readFileSync(indexPath, 'utf8');
+  } catch (e) {
+    logger.warn({ indexPath, err: (e as Error).message }, 'failed to read wiki/index.md');
+    return '';
+  }
+  const summary = parseWikiIndex(content);
+  if (summary) {
+    logger.info({ knowledgeDir, bytes: summary.length }, 'wiki summaries loaded');
+  }
+  return summary;
+}
+
+/**
+ * Parse the markdown-formatted wiki/index.md into a compact bullet list
+ * grouped by topic. The index file is structured as:
+ *
+ *   ## <topic>
+ *
+ *   | Article | Summary | Updated |
+ *   |---------|---------|---------|
+ *   | [<title>](<path>) | <summary text> | <date> |
+ *
+ * Returns markdown like:
+ *
+ *   ## Available knowledge (from hha-knowledge wiki)
+ *
+ *   ### api/
+ *   - <title>: <summary>
+ *   ...
+ *
+ * Empty string if no rows parsed (malformed index).
+ */
+function parseWikiIndex(content: string): string {
+  const lines = content.split('\n');
+  const sections = new Map<string, { title: string; summary: string }[]>();
+  let currentTopic: string | null = null;
+  for (const line of lines) {
+    const h = line.match(/^##\s+(.+?)\s*$/);
+    if (h && h[1]) {
+      currentTopic = h[1].trim();
+      if (!sections.has(currentTopic)) sections.set(currentTopic, []);
+      continue;
+    }
+    // Match | [<title>](<path>) | <summary> | <date> |
+    // Each cell is separated by " | " (space-pipe-space). The first and
+    // last cell may also have leading/trailing "|" which the regex absorbs.
+    const row = line.match(/^\|\s*\[([^\]]+)\]\(([^)]+)\)\s*\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*$/);
+    if (row && currentTopic) {
+      const title = row[1];
+      const summary = row[3];
+      if (!title || !summary) continue;
+      sections.get(currentTopic)!.push({
+        title: title.trim(),
+        summary: summary.trim(),
+      });
+    }
+  }
+  if (sections.size === 0) return '';
+  const out: string[] = [
+    '## Available knowledge (from hha-knowledge wiki)',
+    '',
+    'The following articles are available in the local knowledge base. ' +
+      'Use them to ground your YAML in real card types, real APIs, and ' +
+      'real Jinja2 functions. Do not invent card types or API endpoints.',
+  ];
+  for (const [topic, entries] of sections) {
+    if (entries.length === 0) continue;
+    out.push('');
+    out.push(`### ${topic}/`);
+    for (const e of entries) {
+      out.push(`- ${e.title}: ${e.summary}`);
+    }
+  }
+  return out.join('\n');
+}
+
+/**
  * Load a DESIGN.md from design-systems/<name>/DESIGN.md.
  * Returns the file body prefixed with a header naming the system.
  */
@@ -226,6 +413,19 @@ export async function orchestrate(
     messages.push({ role: 'system', content: `## Active DESIGN.md\n\n${designBlock}` });
   }
   messages.push({ role: 'system', content: `## Active SKILL: ${skillName}\n\n${skillText}` });
+  // v0.3.0: inject hha-knowledge wiki summaries so the LLM knows which
+  // card types / APIs / Jinja2 functions are KNOWN and can ground its
+  // YAML in real schema. Empty when HA_KNOWLEDGE_DIR is unset.
+  const wikiSummary = loadWikiSummaries();
+  if (wikiSummary) {
+    messages.push({ role: 'system', content: wikiSummary });
+  }
+  // v0.3.1: top-k RAG injection of the most relevant chunks for THIS brief.
+  // The summary above is the "table of contents"; this is the body text.
+  const relevantArticles = await loadRelevantArticles(req.brief);
+  if (relevantArticles) {
+    messages.push({ role: 'system', content: relevantArticles });
+  }
   if (entitiesBlock) {
     messages.push({
       role: 'system',
@@ -320,10 +520,18 @@ function validateConfig(
   const warnings: string[] = [];
   const known = new Set(entities.map((e) => e.entity_id));
   const referenced = new Set<string>();
+  // v0.3.0: also collect card `type` strings for soft validation against
+  // the known built-in + HACS card-type set. Anything not in KNOWN_HA_CARD_TYPES
+  // gets a "may be invented" warning. This catches obvious hallucinations
+  // like `type: card-list` or `type: entities-card` before they hit HA.
+  const referencedTypes = new Set<string>();
   walkCards(config, (card) => {
-    const eid = (card as Record<string, unknown>).entity as string | undefined;
+    const obj = card as Record<string, unknown>;
+    const t = obj.type;
+    if (typeof t === 'string') referencedTypes.add(t);
+    const eid = obj.entity as string | undefined;
     if (typeof eid === 'string') referenced.add(eid);
-    const ents = (card as Record<string, unknown>).entities as unknown[] | undefined;
+    const ents = obj.entities as unknown[] | undefined;
     if (Array.isArray(ents)) {
       for (const e of ents) {
         if (typeof e === 'string') referenced.add(e);
@@ -336,6 +544,11 @@ function validateConfig(
   for (const eid of referenced) {
     if (!known.has(eid)) {
       warnings.push(`Unknown entity_id: ${eid} (no match in HA)`);
+    }
+  }
+  for (const t of referencedTypes) {
+    if (!KNOWN_HA_CARD_TYPES.has(t)) {
+      warnings.push(`Unknown card type: "${t}" (not in known built-in / HACS set; may be invented)`);
     }
   }
   return warnings;
@@ -498,6 +711,16 @@ export async function orchestrateStream(
     messages.push({ role: 'system', content: `## Active DESIGN.md\n\n${designBlock}` });
   }
   messages.push({ role: 'system', content: `## Active SKILL: ${skillName}\n\n${skillText}` });
+  // v0.3.0: inject hha-knowledge wiki summaries (same as orchestrate()).
+  const wikiSummary = loadWikiSummaries();
+  if (wikiSummary) {
+    messages.push({ role: 'system', content: wikiSummary });
+  }
+  // v0.3.1: top-k RAG injection (same as orchestrate()).
+  const relevantArticles = await loadRelevantArticles(req.brief);
+  if (relevantArticles) {
+    messages.push({ role: 'system', content: relevantArticles });
+  }
   if (entitiesBlock) {
     messages.push({
       role: 'system',

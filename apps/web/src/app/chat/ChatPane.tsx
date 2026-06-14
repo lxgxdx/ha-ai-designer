@@ -93,6 +93,70 @@ export function ChatPane(): React.ReactElement {
   const [streamedText, setStreamedText] = useState('');
   const [streamStatus, setStreamStatus] = useState<'idle' | 'streaming'>('idle');
 
+  // v0.3.2.3: feedback on the generated dashboard. 1-5 stars (we render
+  // as 👍/👎 + optional comment). Persisted to
+  // ${HA_KNOWLEDGE_DIR}/.feedback/feedback.jsonl by the daemon, which
+  // scripts/learn.ts (v0.3.2.4) reads back to drive wiki-note rewrites.
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackDone, setFeedbackDone] = useState<null | 'up' | 'down'>(null);
+  const [feedbackComment, setFeedbackComment] = useState('');
+  const [showFeedbackComment, setShowFeedbackComment] = useState(false);
+
+  /** Extract entity_ids the LLM touched by walking the parsed config. */
+  function extractEntityRefs(config: unknown): string[] {
+    const out = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) {
+        for (const x of node) walk(x);
+        return;
+      }
+      const obj = node as Record<string, unknown>;
+      if (typeof obj.entity === 'string') out.add(obj.entity);
+      if (Array.isArray(obj.entities)) {
+        for (const e of obj.entities) {
+          if (typeof e === 'string') out.add(e);
+          else if (e && typeof e === 'object' && typeof (e as { entity?: string }).entity === 'string') {
+            out.add((e as { entity: string }).entity);
+          }
+        }
+      }
+      for (const k of ['cards', 'sections', 'views', 'entities', 'badges']) {
+        if (obj[k] !== undefined) walk(obj[k]);
+      }
+    };
+    walk(config);
+    return Array.from(out).slice(0, 200);
+  }
+
+  async function submitFeedback(rating: number): Promise<void> {
+    if (!result?.yaml) return;
+    if (feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+    try {
+      const res = await fetch(`${daemonUrl}/api/chat/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          brief,
+          yaml: result.yaml,
+          rating,
+          comment: feedbackComment.trim() || undefined,
+          entityRefs: extractEntityRefs(result.config),
+        }),
+      });
+      if (!res.ok && res.status !== 204) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      setFeedbackDone(rating >= 4 ? 'up' : 'down');
+    } catch (e) {
+      console.warn('failed to submit feedback', e);
+      setError(`反馈提交失败：${(e as Error).message}`);
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }
+
   // v0.2.0: every daemon call goes through the same-origin Next.js
   // catch-all proxy at /api/daemon/* (apps/web/src/app/api/daemon/[...path]/route.ts),
   // which attaches the X-Addon-Internal-Token header. The browser
@@ -421,6 +485,101 @@ export function ChatPane(): React.ReactElement {
               </ul>
             </div>
           )}
+
+          {/* v0.3.2.3: feedback row. 👍 (rating=5) / 👎 (rating=2) + optional
+              comment. Hidden after submit. Once submitted, the daemon
+              writes a JSONL line to ${HA_KNOWLEDGE_DIR}/.feedback/. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: 10,
+              background: '#0b1220',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              fontSize: 13,
+              color: 'var(--text-dim)',
+            }}
+          >
+            {feedbackDone ? (
+              <span style={{ color: 'var(--text)' }}>
+                {feedbackDone === 'up' ? '✓ 已记录好评，感谢反馈' : '✓ 已记录差评，learn.ts 会基于此改写 wiki 笔记'}
+                {feedbackComment && <em style={{ marginLeft: 8 }}>“{feedbackComment}”</em>}
+              </span>
+            ) : (
+              <>
+                <span>这一稿对不对？</span>
+                <button
+                  type="button"
+                  onClick={() => submitFeedback(5)}
+                  disabled={feedbackSubmitting}
+                  title="5 星：完美 / 直接可用"
+                  style={{
+                    padding: '6px 12px',
+                    background: feedbackSubmitting ? '#475569' : '#16a34a',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: feedbackSubmitting ? 'wait' : 'pointer',
+                  }}
+                >
+                  👍
+                </button>
+                <button
+                  type="button"
+                  onClick={() => submitFeedback(2)}
+                  disabled={feedbackSubmitting}
+                  title="2 星：有明显问题"
+                  style={{
+                    padding: '6px 12px',
+                    background: feedbackSubmitting ? '#475569' : '#dc2626',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    fontSize: 14,
+                    cursor: feedbackSubmitting ? 'wait' : 'pointer',
+                  }}
+                >
+                  👎
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFeedbackComment((v) => !v)}
+                  style={{
+                    padding: '4px 8px',
+                    background: 'transparent',
+                    color: 'var(--text-dim)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showFeedbackComment ? '收起评论' : '加评论'}
+                </button>
+                {showFeedbackComment && (
+                  <input
+                    type="text"
+                    value={feedbackComment}
+                    onChange={(e) => setFeedbackComment(e.target.value)}
+                    placeholder="（可选）说明哪里不对，例如 '灯卡全用 tile 但我装的是 mushroom'"
+                    style={{
+                      flex: 1,
+                      minWidth: 200,
+                      background: '#0b1220',
+                      color: 'var(--text)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 4,
+                      padding: '6px 8px',
+                      fontSize: 12,
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </div>
 
           <pre
             style={{

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目一句话
 
-本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通**：brief → LLM（MiniMax m3）→ LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。两条部署路径：本地 `pnpm tools-dev run web`、HA Add-on `addons/ha-ai-designer/`（已发布到 `ghcr.io/lxgxdx/ha-ai-designer`，**v0.1.20 端到端可用**）。
+本地优先的 Home Assistant Lovelace 仪表板 AI 设计工具。**端到端已跑通（v0.2.0）**：brief → LLM（MiniMax m3）→ LovelaceConfig YAML → WebSocket 推到用户 HA → 自动备份 → 一键回滚。两条部署路径：本地 `pnpm tools-dev run web`、HA Add-on `addons/ha-ai-designer/`（已发布到 `ghcr.io/lxgxdx/ha-ai-designer:0.2.0`，**add-on 模式 v0.2.0 端到端 work**）。
 
 设计思路参考 [nexu-io/open-design](https://github.com/nexu-io/open-design)：SKILL.md / DESIGN.md / 沙箱预览范式，**目标域是 HA 卡片 YAML 而非通用 HTML**。
 

@@ -6,11 +6,13 @@
 
 ---
 
-## 当前状态：骨架阶段（v0.1.0）
+## 当前状态：v0.2.0 端到端可用
 
-只有**空壳**：daemon 跑通 `/api/health`、web 起一个欢迎页、`pnpm tools-dev` 能起停。下一步是接 HA（读实体 / 推 dashboard）。
+**v0.2.0 已完成**：brief → LLM（MiniMax m3，OpenAI 兼容）→ LovelaceConfig YAML → SSE 流式输出 → WebSocket 推 HA → 自动备份 → 一键回滚。add-on 模式 `ghcr.io/lxgxdx/ha-ai-designer:0.2.0` 在 HA 侧栏已可见并能跑通。
 
-详细路线 → `AGENTS.md` 与 `docs/`。
+**add-on 端到端** 包含：v0.1.22 修的 SSRF + web↔daemon 内部 auth，v0.2.0 修的 SSE streaming + setup wizard + same-origin proxy + 6 个 v0.2.0 安全 review 修法（IPv4-mapped IPv6 / setup CSRF / query allowlist / abort heartbeat / proxy POST export / non-null assertions）。
+
+**next**：v0.3 RAG 接 hha-knowledge 51 张 HA 卡片；v0.4 实时预览 iframe + Tweaks 滑块。详见 `docs/ops/A-task-runbook.md`（end-to-end 验收步骤） + `AGENTS.md` + `CLAUDE.md` 14 lessons。
 
 ---
 
@@ -78,10 +80,10 @@ ha-ai-designer/
 ## 路线图
 
 - [x] v0.1 骨架：workspace + lifecycle + 空 web/daemon
-- [ ] v0.2 HA 接入：list entities / get dashboard / push dashboard
-- [ ] v0.3 RAG：抓 HA 内置 + HACS 主流卡片文档
-- [ ] v0.4 LLM 接入：BYOK（OpenAI 兼容 / Ollama）+ 结构化输出
-- [ ] v0.5 预览：iframe + 真实 HA 卡片渲染
-- [ ] v0.6 Tweaks 面板：grid span / 主题色 / 字号 滑块
-- [ ] v0.7 一键 push + 自动备份 + 回滚
-- [ ] v1.0 HA Add-on 打包
+- [x] v0.2 HA 接入 + LLM 接入 + push dashboard + 自动备份 + 回滚（v0.2.0 端到端可用）
+- [ ] v0.3 RAG：把 `E:\Claude\hha-knowledge\` 51 张 HA 卡片 + HACS 卡片接进 orchestrator prompt
+- [ ] v0.4 实时预览 iframe + Tweaks 滑块
+- [ ] v0.5 多 dashboard 覆盖（非 default storage / YAML 模式）
+- [ ] v0.6 错误恢复 + 离线容忍 + entity 缓存
+- [ ] v0.7 HACS / HA 商店上架 + i18n
+- [ ] v1.0 GA

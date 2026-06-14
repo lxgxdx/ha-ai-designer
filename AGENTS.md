@@ -20,10 +20,10 @@
 
 | 路径 | 用途 |
 |---|---|
-| `apps/web` | Next.js 14 App Router 前端（待建） |
-| `apps/daemon` | Express + better-sqlite3 本地守护进程（待建） |
+| `apps/web` | Next.js 15.1.6 App Router（首页 + /chat + /setup 三页 + `/api/daemon/[...path]` catch-all proxy + `/api/setup/*` server-side routes） |
+| `apps/daemon` | Express + ws + pino 守护进程（5 子系统：REST/WS/LLM/orchestrator/preview-session + internal auth middleware） |
 | `packages/contracts` | 共享 TypeScript 类型 / DTO（纯 TS，无运行时依赖） |
-| `tools/dev` | 本地 lifecycle 控制平面（`pnpm tools-dev start/stop/run/status/logs`） |
+| `tools/dev` | 本地 lifecycle 控制平面（`pnpm tools-dev start/stop/run/status/logs/check`） |
 
 **顶层内容目录**（与 open-design 一致）：
 
@@ -77,7 +77,7 @@ pnpm tools-dev check                                      # 健康检查
 - `pnpm tools-dev`（tools 入口）
 - `pnpm typecheck`（仓库级，遍历各包）
 - `pnpm build`（仓库级）
-- `pnpm guard`（仓库级 lint / 静态检查 — 待补）
+- `pnpm guard`（仓库级 lint / 静态检查 — 占位；目前用 `pnpm typecheck` 兜底）
 
 **禁止**添加根 `pnpm dev` / `pnpm start` / `pnpm test` 别名。dev/test/build 命令必须落在包内（`pnpm --filter <pkg> ...`）。
 
@@ -86,7 +86,7 @@ pnpm tools-dev check                                      # 健康检查
 - 文件名用 kebab-case（`ha-tools.ts`），不混 snake_case / camelCase。
 - 路由文件：`routes/<feature>.ts`，导出一个 `register(app)` 函数。
 - DTO 放在 `packages/contracts/src/api/<feature>.ts`，**纯 TS**，禁止引 Node / 浏览器 / Next / Express / SQLite API。
-- 写日志统一用 `pino`（待加），不混 `console.log`。
+- 写日志统一用 `pino`（已加，在 `apps/daemon/src/logger.ts`），不混 `console.log`。
 - 中文注释 / README 用简体中文；代码 / 命令 / 变量名一律英文。
 
 ## 验证策略

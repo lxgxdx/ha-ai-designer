@@ -7,7 +7,9 @@ import { createHaRouter } from './routes/ha.js';
 import { createLlmRouter } from './routes/llm.js';
 import { createChatRouter } from './routes/chat.js';
 import { createPreviewRouter } from './routes/preview.js';
+import { createFeedbackRouter } from './routes/feedback.js';
 import { loadOrCreateInternalToken, internalAuthMiddleware } from './internal-auth.js';
+import { initRagStore } from './rag-store.js';
 
 function buildApp(internalToken: string): express.Express {
   const app = express();
@@ -43,6 +45,10 @@ function buildApp(internalToken: string): express.Express {
   app.use(createHaRouter());
   app.use(createLlmRouter());
   app.use(createChatRouter());
+  // v0.3.2.3: feedback router — POST /api/chat/feedback. Persists
+  // user ratings to ${HA_KNOWLEDGE_DIR}/.feedback/feedback.jsonl for
+  // downstream learn.ts (v0.3.2.4) to consume.
+  app.use(createFeedbackRouter());
 
   // 404 + error handlers.
   app.use((_req, res) => res.status(404).json({ error: 'not found' }));
@@ -71,6 +77,14 @@ function main(): void {
       { host: config.host, port: config.port, webOrigin: config.webOrigin },
       'ha-ai-designer daemon listening',
     );
+  });
+
+  // v0.3.1: warm the RAG index in the background. Fire-and-forget so the
+  // daemon stays responsive even when the embedding API is slow or
+  // temporarily down — /api/chat degrades to "v0.3.0 summary-only" mode
+  // while the index is being built (searchRelevantAsync returns []).
+  initRagStore().catch((e) => {
+    logger.error({ err: (e as Error).message }, 'RAG init failed');
   });
 
   // Graceful shutdown — flush logs, drain in-flight requests.

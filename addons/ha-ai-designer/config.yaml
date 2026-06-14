@@ -1,6 +1,6 @@
 ---
 name: "HA AI Designer"
-version: "0.2.0"
+version: "0.3.0"
 slug: "ha_ai_designer"
 description: >
   Local-first AI designer for Home Assistant Lovelace dashboards.
@@ -24,6 +24,21 @@ ingress_port: 3000
 panel_icon: "mdi:robot"
 panel_title: "AI Designer"
 panel_admin: true
+# v0.3.0.0: bind-mount the HA supervisor "share" directory so the
+# add-on can read the user's hha-knowledge wiki (which lives outside
+# the daemon's git repo and so can't be COPYed into the build context
+# — see CLAUDE.md 14 课 #14 and #15). The user is expected to
+# populate /share/hha-knowledge/ on the HA host (e.g. via rsync / scp
+# from their dev machine, or a periodic push script). The add-on
+# then exposes this at /share inside the container; run.sh sets
+# HA_KNOWLEDGE_DIR to that path.
+#
+# Read-only (`:ro`) is enough — the daemon never writes to the wiki
+# (it only writes to .feedback/, which we put in the same tree so
+# feedback is colocated with the data it describes). If you change
+# to `:rw`, the daemon's appends will leak back to your host share.
+map:
+  - "share:rw"
 ports:
   "7456/tcp": null
   "3000/tcp": null
@@ -41,4 +56,30 @@ schema:
   llm_base_url: "url"
   llm_model: "str"
   llm_api_key: "password"
+  # v0.3.1.1: RAG embedding endpoint (independent of the chat LLM).
+  # Set these to enable wiki retrieval. Common setups:
+  #   - Local infinity + BAAI/bge-m3:  embedding_base_url=http://<host>:7997
+  #                                    embedding_model=BAAI/bge-m3
+  #   - OpenAI:                         embedding_base_url=https://api.openai.com/v1
+  #                                    embedding_api_key=sk-...
+  #                                    embedding_model=text-embedding-3-small
+  #   - Reuse chat provider:            leave embedding_base_url blank
+  #                                    embedding_model=embo-01  (or whatever the
+  #                                    chat provider serves at /v1/embeddings)
+  embedding_base_url: "url?"
+  embedding_model: "str"
+  embedding_api_key: "password?"
+  # v0.3.0.0: path to the hha-knowledge wiki, RELATIVE to the
+  # supervisor share root. The add-on's `map: ["share:rw"]` above
+  # exposes that root at /share inside the container; this config
+  # value is appended to it. Default: "hha-knowledge" → the daemon
+  # will read /share/hha-knowledge/wiki/index.md at startup.
+  #
+  # To populate it from your dev machine (where hha-knowledge lives at
+  # E:\Claude\hha-knowledge on the user's setup), the recommended
+  # one-liner is:
+  #   scp -r E:\Claude\hha-knowledge hassio@192.168.88.183:/usr/share/hassio/share/
+  # (Adjust for your HA host. Re-run after wiki changes — or wire up
+  # a cron / systemd timer.)
+  knowledge_dir: "str"
 image: "ghcr.io/lxgxdx/ha-ai-designer"

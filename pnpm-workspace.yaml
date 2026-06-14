@@ -2,3 +2,10 @@ packages:
   - "apps/*"
   - "packages/*"
   - "tools/*"
+
+# v0.3.0.1: same as .npmrc — allow better-sqlite3 to run its
+# prebuild-install / node-gyp lifecycle. Redundant with .npmrc but
+# keeps the policy in the workspace file too, so `pnpm install` in a
+# subdirectory picks it up.
+onlyBuiltDependencies:
+  - "better-sqlite3"

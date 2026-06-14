@@ -27,8 +27,67 @@ export interface LlmConfig {
   baseUrl: string;
   /** API key. For Ollama, can be empty. Stored as-is, never logged. */
   apiKey: string;
-  /** Default model id, e.g. "gpt-4o" or "qwen2.5-coder:32b". */
+  /** Default chat model id, e.g. "gpt-4o" or "qwen2.5-coder:32b". */
   model: string;
+  /**
+   * v0.3.1 (RAG): embedding model id for the RAG retrieval layer.
+   * Optional — when unset, RAG is disabled. The embedding endpoint is
+   * assumed to live at the same baseUrl under `/v1/embeddings` (the
+   * OpenAI-compat shape, which MiniMax / OpenAI / Qwen / Ollama all
+   * expose). Recommended values: `text-embedding-3-small` (1536d,
+   * OpenAI) or whatever the BYOK provider documents.
+   */
+  embeddingModel?: string;
+  /**
+   * v0.3.1.1: optional override for the embedding endpoint baseUrl.
+   * Useful when the chat and embedding providers differ — e.g. chat
+   * via MiniMax, embeddings via a local `infinity` server running
+   * BAAI/bge-m3. Falls back to `baseUrl` when unset.
+   */
+  embeddingBaseUrl?: string;
+  /**
+   * v0.3.1.1: optional apiKey for the embedding endpoint, used only
+   * when `embeddingBaseUrl` is set. Falls back to `apiKey` when unset.
+   * Most local embedding servers (infinity / Ollama / vLLM / LM Studio)
+   * don't require a key.
+   */
+  embeddingApiKey?: string;
+}
+
+/**
+ * v0.3.1.1: independent embedding config loader. RAG-only — does NOT
+ * require the chat LLM (provider/baseUrl/apiKey/model) to be set.
+ * Returns null if no embeddingModel is configured (RAG disabled).
+ *
+ * Resolution order for each field:
+ *   - model:    `llm.embeddingModel` (required for RAG)
+ *   - baseUrl:  `llm.embeddingBaseUrl` ?? `llm.baseUrl` ?? ''
+ *   - apiKey:   `llm.embeddingApiKey` ?? `llm.apiKey` ?? ''
+ *
+ * The fallback chain means:
+ *   - If the user configures ONLY the chat LLM and uses a provider
+ *     that also serves /v1/embeddings (e.g. OpenAI, MiniMax), the
+ *     chat baseUrl is reused.
+ *   - If the user configures ONLY the embedding (e.g. local infinity
+ *     + bge-m3, no chat LLM in the picture), the chat fields can be
+ *     left blank in config.json — loadLlmConfig() will still throw on
+ *     /api/chat, but the RAG store will index just fine.
+ */
+export interface EmbeddingConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+export function loadEmbeddingConfig(): EmbeddingConfig | null {
+  const cfg = loadConfig();
+  const model = cfg.llm?.embeddingModel;
+  if (!model) return null;
+  return {
+    baseUrl: cfg.llm?.embeddingBaseUrl ?? cfg.llm?.baseUrl ?? '',
+    apiKey: cfg.llm?.embeddingApiKey ?? cfg.llm?.apiKey ?? '',
+    model,
+  };
 }
 
 interface AppConfig {
