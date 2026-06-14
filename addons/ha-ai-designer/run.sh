@@ -152,15 +152,24 @@ if [ -n "${SUPERVISOR_TOKEN}" ] || [ -n "${LLM_API_KEY}" ] || [ -n "${EMBEDDING_
   # empty user inputs are NOT written as empty strings (the daemon's
   # `?? null` fallback would not trigger on "" and we'd get a confusing
   # "baseUrl not configured" error).
-  if [ -n "${EMBEDDING_MODEL}" ]; then
+  #
+  # v0.3.1.2: bashio::config for an UNSET option returns the literal
+  # string "null" on this hassio base 16.3.2 (NOT empty string). The
+  # v0.3.1.1 guard (`if $baseUrl != ""`) was therefore insufficient
+  # and the literal `"null"` ended up in config.json — which then made
+  # the daemon build URLs like `null/embeddings` and fail embedding
+  # probe. Guard against both the empty case AND the literal-"null"
+  # case (defensive: "null" in the v0.3.1 base, "null" set in jq
+  # output also rejected to be safe).
+  if [ -n "${EMBEDDING_MODEL}" ] && [ "${EMBEDDING_MODEL}" != "null" ]; then
     LLM_JSON=$(echo "${LLM_JSON}" | jq \
       --arg model "${EMBEDDING_MODEL}" \
       --arg baseUrl "${EMBEDDING_BASE_URL}" \
       --arg apiKey "${EMBEDDING_API_KEY}" \
       '. + (
         {embeddingModel: $model}
-        + (if $baseUrl != "" then {embeddingBaseUrl: $baseUrl} else {} end)
-        + (if $apiKey  != "" then {embeddingApiKey:  $apiKey}  else {} end)
+        + (if $baseUrl != "" and $baseUrl != "null" then {embeddingBaseUrl: $baseUrl} else {} end)
+        + (if $apiKey  != "" and $apiKey  != "null" then {embeddingApiKey:  $apiKey}  else {} end)
       )')
     bashio::log.info "  llm.embedding: ${EMBEDDING_MODEL} ${EMBEDDING_BASE_URL:+@ ${EMBEDDING_BASE_URL}}"
   fi
