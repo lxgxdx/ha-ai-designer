@@ -33,9 +33,10 @@
  * through this same-origin proxy so ingress can carry the request.
  */
 import { type NextRequest } from 'next/server';
+import { getInternalToken } from '@ha-designer/contracts';
 
 const DAEMON_URL = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
-const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
+const TOKEN = getInternalToken();
 
 // Path allowlist. /api/chat is matched exactly; the rest are prefix
 // matches (so /api/ha/ping, /api/ha/entities, /api/llm/config etc.

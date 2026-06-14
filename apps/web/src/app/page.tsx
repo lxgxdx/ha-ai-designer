@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { getInternalToken } from '@ha-designer/contracts';
 
 /**
  * Entry view — v0.2.0.
@@ -16,7 +17,7 @@ import { redirect } from 'next/navigation';
 export const dynamic = 'force-dynamic';
 
 const DAEMON = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
-const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
+const TOKEN = getInternalToken();
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return { ...(extra ?? {}), ...(TOKEN ? { 'X-Internal-Token': TOKEN } : {}) };

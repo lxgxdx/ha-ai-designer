@@ -15,9 +15,10 @@
  * a browser, so this is a safe default).
  */
 import { type NextRequest } from 'next/server';
+import { getInternalToken } from '@ha-designer/contracts';
 
 const DAEMON_URL = process.env.HA_DAEMON_URL ?? 'http://127.0.0.1:7456';
-const TOKEN = process.env.HA_DAEMON_TOKEN ?? '';
+const TOKEN = getInternalToken();
 
 const ALLOWED_ORIGINS = new Set([
   process.env.HA_INGRESS_ORIGIN ?? 'http://homeassistant.local:8123',
