@@ -7,18 +7,14 @@
 ## TL;DR
 
 ```bash
-# 1. Install Node 24 LTS (NOT 20 — better-sqlite3 prebuilds differ)
-winget install OpenJS.NodeJS.LTS
+# 1. Install Node 22 LTS (NOT 20 or 24 — see "Why Node 22" below)
+winget install OpenJS.NodeJS.22
 
 # 2. Install pnpm
 npm install -g pnpm@10.33.2
 
-# 3. Install Visual Studio Build Tools 2022 (C++ workload)
-#    This is the ONLY big download (~5GB) — needed to compile
-#    better-sqlite3 from source on Windows. Get the "Build Tools
-#    for Visual Studio" installer from
-#    https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022
-#    and check "Desktop development with C++".
+# 3. (no Visual Studio needed if you stick to Node 22)
+#    better-sqlite3 11 has prebuilt win32-x64 binaries for Node 22.
 
 # 4. Then:
 git clone https://github.com/lxgxdx/ha-ai-designer.git
@@ -29,24 +25,24 @@ pnpm --filter @ha-designer/web build
 pnpm desktop:dev
 ```
 
-## Why Visual Studio Build Tools?
+## Why Node 22 (not 20, not 24)?
 
-The daemon uses `better-sqlite3@11` for the RAG vector store (sqlite-vec). On Windows, the prebuilt binaries cover Node 18-22 (x64, arm64). We're on **Node 24**, so `prebuild-install` can't find a match and falls through to `node-gyp rebuild --release`, which needs MSVC's `cl.exe` and the Windows SDK.
+The daemon uses `better-sqlite3@11` for the RAG vector store (sqlite-vec). On Windows, the prebuilt binaries cover **Node 18-22** (x64, arm64). Node 24 is bleeding-edge — better-sqlite3 11.10.0 doesn't ship a Node 24 prebuild for win32, and node-gyp falls through to a source build that fails on `windows-latest` GitHub runners (they have VS 2026 / "v18" which node-gyp 11.5.0 doesn't recognize).
 
-`npm install -g windows-build-tools` (the old way) is **deprecated** and doesn't work on Windows 11 / Node 24.
+**Electron 35+ ships with Node 22.15.0**, so the .node binary we build for Node 22 is ABI-compatible with the runtime. No mismatch.
 
-## The "I don't want to install VS Build Tools" alternative
+## The "I don't want to install anything but the .exe" alternative
 
 If you just want to USE the app, download the pre-built installer:
 
 1. Go to [Releases](https://github.com/lxgxdx/ha-ai-designer/releases)
-2. Download `ha-ai-designer-Setup-0.5.0-alpha.1.exe`
+2. Download `ha-ai-designer-Setup-0.5.0.exe`
 3. Double-click, Next-Next-Finish
 4. Launch from Start menu
 
 The installer bundles:
-- Electron 33 prebuilt (no Node version mismatch)
-- Compiled `dist/server.js` (no better-sqlite3 compile needed)
+- Electron 35 prebuilt (Node 22.15 runtime)
+- Compiled `dist/server.js` (better-sqlite3 .node binary for win32-x64)
 - Next.js `.next/` build + node_modules
 - Everything else
 
@@ -56,7 +52,8 @@ You never need `pnpm install` on your machine.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `pnpm install` hangs forever on `better-sqlite3 install` | No MSVC | Install VS Build Tools (see above) |
+| `prebuild-install warn No prebuilt binaries found` then `gyp ERR! find VS` | Wrong Node version (24+) | Downgrade to Node 22 LTS |
+| `gyp ERR! find VS could not find a version of Visual Studio 2017 or newer` | VS version too new for node-gyp 11.5.0 | Either: (a) downgrade Node to 22 so prebuild wins, or (b) install VS 2022 Build Tools (5GB) |
 | `error MSB8036: Could not find WindowsSDKDir` | Old Windows 10 SDK | In VS Installer → Modify → "Windows 11 SDK" |
 | `EACCES: permission denied, unlink '...node_modules\...'` | Another process holds a file handle | Close VS Code / Docker / antivirus; retry |
 | `gyp ERR! find VS msvs_version not set` | No VS detected | Set `npm config set msvs_version 2022` |
@@ -69,8 +66,10 @@ Easier. Just `pnpm install` works out of the box on both:
 - Linux: prebuilt `node-gyp` comes with `build-essential`
 - macOS: prebuilt `node-gyp` comes with Xcode Command Line Tools (`xcode-select --install`)
 
-## Why is this only a Windows problem?
+## Why we keep Node 22 pinned (not jumping to 24)
 
-Both the daemon's better-sqlite3 AND electron-builder are prebuilt for Linux x64 + macOS x64/arm64. Only Windows loses the prebuild match for Node 24 (better-sqlite3 ships Node 22 prebuilds for win32, but we're on 24).
+- better-sqlite3 11.x prebuilts: Node 18-22 (Node 23+ not yet covered)
+- Electron 35-36 ship Node 22 (Electron 37+ plans to switch to Node 24; not stable yet)
+- Node 22 is an active LTS until October 2026
 
-**Workaround we're considering for v0.5.x**: switch to Node 22 to match better-sqlite3's prebuild matrix. Tradeoff: lose Node 24 features (some perf improvements, new APIs). Not in v0.5.0-alpha.1 — revisit in v0.6.0 if Windows dev pain continues.
+Once Electron 37 stabilizes on Node 24, AND better-sqlite3 ships Node 24 prebuilts, we can revisit. Until then, Node 22 is the sweet spot.

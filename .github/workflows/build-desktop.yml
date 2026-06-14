@@ -68,7 +68,15 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          # v0.5.0-alpha.3: pin to Node 22, not 24. better-sqlite3
+          # 11.10.0 ships prebuilts for Node 22 (win32-x64) but not
+          # Node 24. Pinning CI to 24 forces a node-gyp rebuild,
+          # which fails on windows-latest because the runner has
+          # VS 2026 (v18) that node-gyp 11.5.0 doesn't recognize.
+          # Electron 35+ ships with Node 22.15, so the .node
+          # binary we build for 22 is ABI-compatible with the
+          # runtime.
+          node-version: 22
           cache: pnpm
 
       # v0.5.0: daemon has better-sqlite3 (native build) and

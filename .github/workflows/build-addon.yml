@@ -1,19 +1,32 @@
 name: Build HA Add-on Image
 
-# Builds the ha-ai-designer add-on Docker image on every push to main
-# and on PRs. Publishes to GitHub Container Registry (ghcr.io).
+# Builds the ha-ai-designer add-on Docker image. v0.5.0: this
+# workflow is in **maintenance mode** — see
+# `addons/ha-ai-designer/DEPRECATED.md`. It only triggers on
+# changes to add-on-specific paths, not on every master push.
+# Tag pushes (`v*` or `addon-v*`) still trigger for stable
+# add-on releases.
 #
 # Triggered by:
-#   - push to main (builds + pushes multi-arch)
-#   - pull_request to main (builds amd64 only, no push — CI check)
-#   - manual workflow_dispatch (for testing)
+#   - push to master  with paths: addons/**, .github/workflows/build-addon.yml, repository.yaml
+#   - tag push v*     with paths: addons/**, .github/workflows/build-addon.yml, repository.yaml
+#   - PR to master    with same paths filter (CI check)
+#   - manual workflow_dispatch (always runs, no path filter)
 
 on:
   push:
     branches: [master]
-    tags: ['v*']
+    tags: ['v*', 'addon-v*']
+    paths:
+      - 'addons/**'
+      - '.github/workflows/build-addon.yml'
+      - 'repository.yaml'
   pull_request:
     branches: [master]
+    paths:
+      - 'addons/**'
+      - '.github/workflows/build-addon.yml'
+      - 'repository.yaml'
   workflow_dispatch:
     inputs:
       push:

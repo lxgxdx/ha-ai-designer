@@ -1,11 +1,11 @@
 {
   "name": "ha-ai-designer",
-  "version": "0.5.0-alpha.1",
+  "version": "0.5.0-alpha.3",
   "private": true,
   "description": "Local-first AI designer for Home Assistant Lovelace dashboards",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "packageManager": "pnpm@10.33.2",
   "scripts": {
