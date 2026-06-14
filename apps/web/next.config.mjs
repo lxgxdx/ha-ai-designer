@@ -9,15 +9,20 @@ const nextConfig = {
   //  We use pnpm deploy --prod in the Dockerfile instead, which produces a
   //  self-contained runtime with all production deps inlined.
   // output: 'standalone',
-  // v0.3.3: when the add-on is served via HA ingress, the supervisor
-  // proxy passes the full path (e.g. /hassio/ingress/ha_ai_designer/chat)
-  // to the web container. Without basePath, Next.js routes registered
-  // as `/chat` don't match, and the user sees a 404 on every Link click.
-  // The slug is hardcoded (matches addons/.../config.yaml:slug) so we
-  // don't need a build-time env. If you ever rename the add-on, update
-  // both this basePath AND the slug field in config.yaml.
-  basePath: '/hassio/ingress/ha_ai_designer',
-  assetPrefix: '/hassio/ingress/ha_ai_designer/',
+  // v0.3.3 set basePath: '/hassio/ingress/ha_ai_designer' + assetPrefix
+  // based on the assumption that HA ingress passes the full prefix path
+  // to the web container. After install, every route 404'd — empirically
+  // HA ingress appears to ALREADY strip the ingress prefix before
+  // forwarding, so the web container sees `/chat`, not
+  // `/hassio/ingress/ha_ai_designer/chat`. basePath is wrong here.
+  //
+  // v0.2.0 worked WITHOUT basePath, which corroborates the strip
+  // behavior. Reverting. If sub-page 404 ever comes back, the next
+  // step is to read HA supervisor's strip config (in
+  // /usr/share/hassio/share/) or switch to output: 'standalone' + a
+  // custom server.
+  // basePath: '/hassio/ingress/ha_ai_designer',  // v0.3.3 — wrong, see above
+  // assetPrefix: '/hassio/ingress/ha_ai_designer/',  // v0.3.3 — wrong
   // Forward HA_DAEMON_* env to the server runtime (used by API proxy route).
   env: {
     HA_DAEMON_URL:
