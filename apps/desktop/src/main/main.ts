@@ -113,6 +113,35 @@ function logFilePath(name: string): string {
   return join(app.getPath('logs'), name);
 }
 
+/**
+ * v0.5.0-alpha.5: ring buffer of recent subprocess output. When the
+ * packaged daemon crashes during require() (e.g. missing native
+ * module), it dies before writing anything to the log file — the
+ * user is then left staring at a "Timed out" dialog with no
+ * clue. By keeping the last ~80 lines in memory, we can dump them
+ * into the error dialog so the actual stack trace is visible.
+ */
+const RING_BUFFER_LINES = 80;
+const ringBuffers: Map<string, string[]> = new Map();
+
+function appendToRingBuffer(key: string, line: string): void {
+  let buf = ringBuffers.get(key);
+  if (!buf) {
+    buf = [];
+    ringBuffers.set(key, buf);
+  }
+  buf.push(line);
+  if (buf.length > RING_BUFFER_LINES) {
+    buf.splice(0, buf.length - RING_BUFFER_LINES);
+  }
+}
+
+function getRingBufferSnapshot(key: string): string {
+  const buf = ringBuffers.get(key);
+  if (!buf || buf.length === 0) return '(no output captured)';
+  return buf.join('\n');
+}
+
 function pipeStreamToFile(
   stream: NodeJS.ReadableStream | null,
   file: string,
@@ -120,6 +149,7 @@ function pipeStreamToFile(
 ): void {
   if (!stream) return;
   const fd = openSync(file, 'a');
+  let buffered = '';
   stream.on('data', (chunk: Buffer) => {
     try {
       // Mirror to file. Errors here are non-fatal.
@@ -128,11 +158,23 @@ function pipeStreamToFile(
     } catch {
       /* ignore */
     }
-    // Also log to Electron's stdout so the user sees it in the
-    // dev terminal.
+    // Mirror to Electron's stdout so the user sees it in the dev terminal.
     process.stdout.write(`[${prefix}] ${chunk.toString()}`);
+
+    // Buffer and split into lines for the ring buffer.
+    buffered += chunk.toString();
+    const lines = buffered.split('\n');
+    buffered = lines.pop() ?? '';
+    for (const line of lines) {
+      appendToRingBuffer(prefix, line);
+    }
   });
   stream.on('end', () => {
+    // Flush any partial trailing line.
+    if (buffered.length > 0) {
+      appendToRingBuffer(prefix, buffered);
+      buffered = '';
+    }
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       require('node:fs').closeSync(fd);
@@ -140,6 +182,32 @@ function pipeStreamToFile(
       /* ignore */
     }
   });
+}
+
+/**
+ * v0.5.0-alpha.5: create the log directory and a fresh log file
+ * with a startup header. Without this, if the child process dies
+ * before its first write, the file is missing entirely and the
+ * user has no idea where to look.
+ */
+function ensureLogFiles(): { daemonLog: string; webLog: string } {
+  const logsDir = app.getPath('logs');
+  try {
+    require('node:fs').mkdirSync(logsDir, { recursive: true });
+  } catch {
+    /* ignore */
+  }
+  const daemonLog = logFilePath('daemon.log');
+  const webLog = logFilePath('web.log');
+  const header = `\n=== ${new Date().toISOString()} HA AI Designer startup ===\n`;
+  for (const f of [daemonLog, webLog]) {
+    try {
+      require('node:fs').appendFileSync(f, header);
+    } catch {
+      /* ignore */
+    }
+  }
+  return { daemonLog, webLog };
 }
 
 async function waitForUrl(url: string, timeoutMs: number): Promise<void> {
@@ -321,9 +389,15 @@ async function shutdown(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  // v0.5.0-alpha.5: pre-create log files so the user can find them
+  // even if the daemon dies before its first write.
+  const { daemonLog, webLog } = ensureLogFiles();
+
   try {
     console.log(`[main] data dir: ${app.getPath('userData')}`);
     console.log(`[main] logs dir: ${app.getPath('logs')}`);
+    console.log(`[main] daemon log: ${daemonLog}`);
+    console.log(`[main] web log:    ${webLog}`);
 
     // 1. Start daemon, wait for /api/health
     console.log('[main] starting daemon…');
@@ -347,10 +421,23 @@ app.whenReady().then(async () => {
     });
   } catch (e) {
     console.error('[main] startup failed:', e);
+    // v0.5.0-alpha.5: include the captured stderr/stdout from the
+    // daemon and web so the user can see WHY startup failed without
+    // having to dig into separate log files. The most common cause
+    // (a missing native .node binary) prints a stack trace here.
+    const daemonTail = getRingBufferSnapshot('daemon');
+    const webTail = getRingBufferSnapshot('web');
     dialog.showErrorBox(
       'HA AI Designer failed to start',
-      `Could not start the local services:\n\n${(e as Error).message}\n\n` +
+      [
+        `Could not start the local services:\n\n${(e as Error).message}\n`,
+        `--- Recent daemon output (last ${RING_BUFFER_LINES} lines) ---\n${daemonTail}\n`,
+        `--- Recent web output (last ${RING_BUFFER_LINES} lines) ---\n${webTail}\n`,
+        `Full logs: ${daemonLog}\n         ${webLog}\n`,
+        `If the daemon output above mentions a missing .node binary or`,
+        `ABI mismatch, your Electron and native module versions don't match.`,
         `Try \`pnpm tools-dev run web\` from a terminal to see detailed logs.`,
+      ].join('\n'),
     );
     app.quit();
   }
